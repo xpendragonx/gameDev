@@ -1,7 +1,8 @@
 // Lemon farm: ASCII top-down map. Clear debris, plant lemon trees, harvest.
-// Pure logic + text rendering, no DOM, so it runs in the browser and in Node.
+// Every tile is a 4x2 character sprite. Pure logic + text rendering, no DOM,
+// so it runs in the browser and in Node.
 
-const W = 40, H = 20;
+const W = 12, H = 8;          // map size in tiles (48 x 16 characters on screen)
 
 const TILE = {
   GROUND: '.',
@@ -12,7 +13,6 @@ const TILE = {
   STUMP: '%',
   SAPLING: 'i',
   TREE: 'Y',
-  FRUIT: '&',   // mature tree with lemons ready
 };
 
 // hits to clear, coins earned
@@ -25,8 +25,25 @@ const DEBRIS = {
 
 const SAPLING_COST = 5;
 const GROW_STEPS = 30;      // steps for sapling -> tree
-const FRUIT_STEPS = 20;     // steps for tree -> fruiting
-const LEMONS_PER_HARVEST = 3;
+const LEMON_STEPS = 8;      // steps for a tree to grow one more lemon
+const MAX_LEMONS = 4;
+
+// Each sprite is two strings of exactly 4 characters.
+const SPRITE = {
+  [TILE.GROUND]:  ['    ', '    '],
+  [TILE.FENCE]:   ['####', '####'],
+  [TILE.WEEDS]:   [' "\'"', '"\'" '],
+  [TILE.LOG]:     ['____', '(__)'],
+  [TILE.ROCK]:    [' __ ', '/__\\'],
+  [TILE.STUMP]:   ['.==.', '|__|'],
+  [TILE.SAPLING]: ['  v ', '  | '],
+};
+const AIM = ['[  ]', '[  ]'];            // shown on the cleared ground you are facing
+const PLAYER = [' o  ', '/|\\ '];
+
+// Lemon slots inside the braces: {  } none, {. } 1, {: } 2, {:.} 3, {::} 4
+const LEMON_SLOTS = ['  ', '. ', ': ', ':.', '::'];
+const treeSprite = (n) => ['{' + LEMON_SLOTS[n] + '}', ' || '];
 
 // Small seeded RNG (mulberry32) so a farm can be reproduced from its seed.
 function rng(seed) {
@@ -51,26 +68,26 @@ function newGame(seed = Date.now()) {
       const r = rand();
       // weeds clump: more likely next to existing weeds
       const nearWeeds = row[x - 1] === TILE.WEEDS || (map[y - 1] && map[y - 1][x] === TILE.WEEDS);
-      const weeds = nearWeeds ? 0.30 : 0.05;
+      const weeds = nearWeeds ? 0.30 : 0.06;
       if (r < weeds) row.push(TILE.WEEDS);
-      else if (r < weeds + 0.04) row.push(TILE.ROCK);
-      else if (r < weeds + 0.06) row.push(TILE.LOG);
-      else if (r < weeds + 0.075) row.push(TILE.STUMP);
+      else if (r < weeds + 0.07) row.push(TILE.ROCK);
+      else if (r < weeds + 0.11) row.push(TILE.LOG);
+      else if (r < weeds + 0.14) row.push(TILE.STUMP);
       else row.push(TILE.GROUND);
     }
     map.push(row);
   }
   // Clear a starting yard so the player never spawns walled in.
-  const start = { x: 2, y: 2 };
-  for (let y = 1; y <= 4; y++) for (let x = 1; x <= 4; x++) map[y][x] = TILE.GROUND;
+  for (let y = 1; y <= 2; y++) for (let x = 1; x <= 2; x++) map[y][x] = TILE.GROUND;
 
   return {
     seed, map, W, H,
-    player: { ...start, face: { x: 1, y: 0 } },
+    player: { x: 1, y: 1, face: { x: 1, y: 0 } },
     coins: 0, lemons: 0, saplings: 3,
     step: 0,
     hits: {},      // "x,y" -> damage dealt to debris so far
-    age: {},       // "x,y" -> step when planted / last harvested
+    age: {},       // "x,y" -> step the sapling was planted
+    trees: {},     // "x,y" -> { n: lemons on the tree, at: step of last change }
     msg: 'Arrow keys / WASD to move. Walk into debris to clear it. P plants, E harvests, B buys a sapling.',
   };
 }
@@ -82,15 +99,17 @@ const front = (g) => ({ x: g.player.x + g.player.face.x, y: g.player.y + g.playe
 function advance(g) {
   g.step++;
   for (const k of Object.keys(g.age)) {
-    const [x, y] = k.split(',').map(Number);
-    const t = at(g, x, y);
-    const elapsed = g.step - g.age[k];
-    if (t === TILE.SAPLING && elapsed >= GROW_STEPS) {
-      g.map[y][x] = TILE.TREE; g.age[k] = g.step;
+    if (g.step - g.age[k] >= GROW_STEPS) {
+      const [x, y] = k.split(',').map(Number);
+      g.map[y][x] = TILE.TREE;
+      g.trees[k] = { n: 0, at: g.step };
+      delete g.age[k];
       g.msg = 'A sapling grew into a lemon tree!';
-    } else if (t === TILE.TREE && elapsed >= FRUIT_STEPS) {
-      g.map[y][x] = TILE.FRUIT; g.age[k] = g.step;
-      g.msg = 'A tree is bearing lemons (&). Press E next to it to harvest.';
+    }
+  }
+  for (const t of Object.values(g.trees)) {
+    if (t.n < MAX_LEMONS && g.step - t.at >= LEMON_STEPS) {
+      t.n++; t.at = g.step;
     }
   }
 }
@@ -115,7 +134,7 @@ function move(g, dx, dy) {
   } else if (t === TILE.FENCE) {
     g.msg = "That's the fence.";
   } else {
-    g.msg = 'A lemon tree is in the way.';
+    g.msg = 'A lemon tree is in the way. Press E to pick its lemons.';
   }
   advance(g);
 }
@@ -135,12 +154,13 @@ function plant(g) {
 
 function harvest(g) {
   const { x, y } = front(g);
-  if (at(g, x, y) === TILE.FRUIT) {
-    g.map[y][x] = TILE.TREE;
-    g.age[key(x, y)] = g.step;
-    g.lemons += LEMONS_PER_HARVEST;
-    g.msg = `Harvested ${LEMONS_PER_HARVEST} lemons!`;
-  } else g.msg = 'Nothing to harvest there.';
+  const tree = g.trees[key(x, y)];
+  if (tree && tree.n > 0) {
+    g.lemons += tree.n;
+    g.msg = `Picked ${tree.n} lemon${tree.n > 1 ? 's' : ''}!`;
+    tree.n = 0; tree.at = g.step;
+  } else if (tree) g.msg = 'No lemons on that tree yet.';
+  else g.msg = 'Nothing to harvest there.';
   advance(g);
 }
 
@@ -151,24 +171,35 @@ function buySapling(g) {
   } else g.msg = `A sapling costs ${SAPLING_COST} coins.`;
 }
 
+function spriteAt(g, x, y) {
+  if (x === g.player.x && y === g.player.y) return PLAYER;
+  const t = at(g, x, y);
+  if (t === TILE.TREE) return treeSprite(g.trees[key(x, y)].n);
+  if (t === TILE.GROUND) {
+    const f = front(g);
+    if (f.x === x && f.y === y) return AIM;
+  }
+  return SPRITE[t];
+}
+
 function render(g) {
   const lines = [];
   for (let y = 0; y < H; y++) {
-    let line = '';
+    let top = '', bottom = '';
     for (let x = 0; x < W; x++) {
-      if (x === g.player.x && y === g.player.y) line += '@';
-      else line += g.map[y][x];
+      const s = spriteAt(g, x, y);
+      top += s[0]; bottom += s[1];
     }
-    lines.push(line);
+    lines.push(top, bottom);
   }
   lines.push('');
   lines.push(`Coins: ${g.coins}   Lemons: ${g.lemons}   Saplings: ${g.saplings}   Step: ${g.step}`);
   lines.push(g.msg);
-  lines.push('Legend: @ you  # fence  " weeds  = log  O rock  % stump  i sapling  Y tree  & ripe tree');
+  lines.push('Tree lemons: {  } 0   {. } 1   {: } 2   {:.} 3   {::} 4     [  ] = tile you are facing');
   return lines.join('\n');
 }
 
 const api = { newGame, move, plant, harvest, buySapling, render, TILE, DEBRIS, W, H,
-              SAPLING_COST, GROW_STEPS, FRUIT_STEPS };
+              SAPLING_COST, GROW_STEPS, LEMON_STEPS, MAX_LEMONS };
 if (typeof module !== 'undefined') module.exports = api;
 else window.Farm = api;
