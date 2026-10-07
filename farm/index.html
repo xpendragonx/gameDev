@@ -6,11 +6,15 @@
 <title>Lemon Farm</title>
 <style>
   body { background: #1b1b12; color: #e8e2a0; margin: 0; padding: 16px; }
+  button { display: block; margin: 12px auto 0; padding: 8px 16px; font: 16px monospace;
+           background: #e8e2a0; color: #1b1b12; border: 0; border-radius: 4px; cursor: pointer; }
+  button:active { background: #c9c37a; }
   pre  { font: 18px/1.1 monospace; margin: 0 auto; width: max-content; max-width: 100%; overflow-x: auto; }
 </style>
 </head>
 <body>
 <pre id="screen"></pre>
+<button id="sell" type="button">Sell lemons</button>
 <script src="farm.js"></script>
 <script>
   const params = new URLSearchParams(location.search);
@@ -29,6 +33,11 @@
     else if (k === 'b') Farm.buySapling(game);
     else return;
     e.preventDefault();
+    draw();
+  });
+  document.getElementById('sell').addEventListener('click', (e) => {
+    Farm.sellLemons(game);
+    e.target.blur();   // keep keyboard focus on the game, not the button
     draw();
   });
   draw();

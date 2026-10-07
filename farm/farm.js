@@ -27,6 +27,7 @@ const SAPLING_COST = 5;
 const GROW_STEPS = 30;      // steps for sapling -> tree
 const LEMON_STEPS = 8;      // steps for a tree to grow one more lemon
 const MAX_LEMONS = 4;
+const LEMON_PRICE = 2;      // coins per lemon sold
 
 // Each sprite is two strings of exactly 4 characters.
 const SPRITE = {
@@ -171,6 +172,14 @@ function buySapling(g) {
   } else g.msg = `A sapling costs ${SAPLING_COST} coins.`;
 }
 
+function sellLemons(g) {
+  if (g.lemons < 1) { g.msg = 'You have no lemons to sell.'; return; }
+  const earned = g.lemons * LEMON_PRICE;
+  g.msg = `Sold ${g.lemons} lemon${g.lemons > 1 ? 's' : ''} for ${earned} coins.`;
+  g.coins += earned;
+  g.lemons = 0;
+}
+
 function spriteAt(g, x, y) {
   if (x === g.player.x && y === g.player.y) return PLAYER;
   const t = at(g, x, y);
@@ -199,7 +208,7 @@ function render(g) {
   return lines.join('\n');
 }
 
-const api = { newGame, move, plant, harvest, buySapling, render, TILE, DEBRIS, W, H,
-              SAPLING_COST, GROW_STEPS, LEMON_STEPS, MAX_LEMONS };
+const api = { newGame, move, plant, harvest, buySapling, sellLemons, render, TILE, DEBRIS, W, H,
+              SAPLING_COST, LEMON_PRICE, GROW_STEPS, LEMON_STEPS, MAX_LEMONS };
 if (typeof module !== 'undefined') module.exports = api;
 else window.Farm = api;
