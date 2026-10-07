@@ -28,6 +28,8 @@ const GROW_STEPS = 30;      // steps for sapling -> tree
 const LEMON_STEPS = 8;      // steps for a tree to grow one more lemon
 const MAX_LEMONS = 4;
 const LEMON_PRICE = 2;      // coins per lemon sold
+const CHOP_HITS = { [TILE.SAPLING]: 1, [TILE.TREE]: 3 };
+const WOOD_COINS = 3;       // coins from chopping down a full tree
 
 // Each sprite is two strings of exactly 4 characters.
 const SPRITE = {
@@ -89,7 +91,7 @@ function newGame(seed = Date.now()) {
     hits: {},      // "x,y" -> damage dealt to debris so far
     age: {},       // "x,y" -> step the sapling was planted
     trees: {},     // "x,y" -> { n: lemons on the tree, at: step of last change }
-    msg: 'Arrow keys / WASD to move. Walk into debris to clear it. P plants, E harvests, B buys a sapling.',
+    msg: 'Arrow keys / WASD to move. Walk into debris to clear it. P plants, E harvests, C chops a tree, B buys a sapling.',
   };
 }
 
@@ -180,6 +182,31 @@ function sellLemons(g) {
   g.lemons = 0;
 }
 
+function chop(g) {
+  const { x, y } = front(g);
+  const t = at(g, x, y), k = key(x, y), need = CHOP_HITS[t];
+  if (!need) { g.msg = 'There is no lemon tree in front of you to chop down.'; return; }
+  g.hits[k] = (g.hits[k] || 0) + 1;
+  if (g.hits[k] < need) {
+    g.msg = `Chopping the tree... (${g.hits[k]}/${need})`;
+  } else {
+    delete g.hits[k];
+    g.map[y][x] = TILE.GROUND;
+    if (t === TILE.SAPLING) {
+      delete g.age[k];
+      g.saplings++;
+      g.msg = 'Dug up the sapling. It goes back in your bag.';
+    } else {
+      const n = g.trees[k].n;
+      delete g.trees[k];
+      g.lemons += n;
+      g.coins += WOOD_COINS;
+      g.msg = `Chopped down the tree! +${WOOD_COINS} coins` + (n ? ` and ${n} lemon${n > 1 ? 's' : ''}.` : '.');
+    }
+  }
+  advance(g);
+}
+
 function spriteAt(g, x, y) {
   if (x === g.player.x && y === g.player.y) return PLAYER;
   const t = at(g, x, y);
@@ -208,7 +235,7 @@ function render(g) {
   return lines.join('\n');
 }
 
-const api = { newGame, move, plant, harvest, buySapling, sellLemons, render, TILE, DEBRIS, W, H,
+const api = { newGame, move, plant, harvest, buySapling, sellLemons, chop, render, TILE, DEBRIS, W, H,
               SAPLING_COST, LEMON_PRICE, GROW_STEPS, LEMON_STEPS, MAX_LEMONS };
 if (typeof module !== 'undefined') module.exports = api;
 else window.Farm = api;
