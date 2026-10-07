@@ -110,6 +110,47 @@ same sales. It cost `100 × (2^7 − 1) = 12,700` to get there. Doubling cost fo
 - **Stock caps sales.** The formula has no supply term. The cap is in the sell step.
 - **Marketing is a trade-off,** not a free boost.
 
+## 2.6 Supply side: lemons, squeezing and the variable lemon price
+
+Cups come from lemons. This gives the player a second price to watch: the
+price they **pay** for lemons.
+
+- **Squeeze a Cup button:** 1 lemon becomes 1 cup in stock.
+- **Auto Squeezer:** costs money ($10), then squeezes 1 cup per second. It
+  stops when lemons run out or cup storage is full.
+- **5 upgrade levels:** each costs money and adds 0.2 cups/s.
+
+| Level | Rate (cups/s) | Cost to reach |
+|---|---|---|
+| 1 (buy) | 1.0 | $10 |
+| 2 | 1.2 | $20 |
+| 3 | 1.4 | $40 |
+| 4 | 1.6 | $80 |
+| 5 | 1.8 | $160 |
+| 6 | 2.0 | $320 |
+
+**Variable lemon price.** The price to buy lemons moves, so there are
+*expensive times* and *cheap times* to buy. It copies the wire price in
+the reference game (`adjustWirePrice`, `buyWire`):
+
+```
+price = ceil(100 * (base + 0.03 * sin(wave))) / 100
+wave += 0.4 at random moments (about every 5 seconds)
+base  = 0.10 to start
+```
+
+- The price swings between roughly $0.07 and $0.13 around the base.
+- **Buying pushes the base up** (+0.25% per 10 lemons), so spamming the buy
+  button costs more.
+- **Base decays slowly** back toward a floor of $0.075 while the player is not buying.
+- The UI labels the price CHEAP or PRICEY, compared with a normal $0.10.
+- Lemons come in batches of 10 and storage holds 200, so the player can
+  stock up when cheap and wait out the expensive times.
+
+Margin check: a cup sells for $0.25 and costs one lemon, $0.07 to $0.13. If
+the player drops the cup price toward $0.10 to clear stock, a pricey lemon
+wipes out the profit. Supply cost and demand now pull on the same decision.
+
 ## 3. Stages
 
 Each stage adds a new job and a new kind of decision. All of them act on the
@@ -150,7 +191,7 @@ then directs, so the skill learned by hand becomes a policy.
 
 1. How should the player learn market forces? No approach is chosen yet.
 2. Does the player see the demand curve, or only its results?
-3. Does the price vary by day or weather (a moving best price), or only by marketing and production?
+3. Does the sell price vary by day or weather (a moving best price), or only by marketing and production? (The lemon *buy* price already varies, see 2.6.)
 4. The exact stages between the stand and the empire, and what changes in each.
 5. Is there an ending?
 6. Stock market and region battle details (see section 4).
