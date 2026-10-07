@@ -64,5 +64,7 @@ function clearingPrice(production, opts) {
   return 100;
 }
 
-module.exports = { TICKS_PER_SECOND, demand, unitsPerSale, forecast, newState, tick,
+const api = { TICKS_PER_SECOND, demand, unitsPerSale, forecast, newState, tick,
   marketingCost, buyMarketing, setPrice, clearingPrice };
+if (typeof module !== "undefined") module.exports = api;
+else window.LemonadeMarket = api;
