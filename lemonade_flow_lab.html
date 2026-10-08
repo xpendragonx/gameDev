@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lemonade Flow Lab</title>
+<style>
+  :root{--bg:#0a0f07;--panel:#141b0d;--line:#2f3d1c;--ink:#f4f2c8;--mute:#9aa57a;--accent:#ffe14d}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'DejaVu Sans Mono',Menlo,Consolas,'Liberation Mono',monospace}
+  header{display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center;justify-content:space-between;padding:12px 16px}
+  h1{margin:0;font-size:17px;letter-spacing:1px;color:var(--accent)}
+  button{font:inherit;font-size:13px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:6px 12px;cursor:pointer}
+  button:hover:not(:disabled){border-color:var(--accent)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.on{background:var(--accent);color:#1a1200;border-color:var(--accent);font-weight:700}
+  .wrap{padding:0 16px 24px;max-width:1500px;margin:0 auto}
+  .bar{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin-bottom:10px;font-size:12px;color:var(--mute)}
+  .bar .lbl{margin-left:10px}
+  #screen{background:#070b04;border:1px solid var(--line);border-radius:8px;padding:10px;text-align:center;overflow:hidden;box-shadow:inset 0 0 40px rgba(0,0,0,.6)}
+  #scr{display:inline-block;margin:0;text-align:left;line-height:1.18;white-space:pre;font-family:inherit;user-select:none;-webkit-user-select:none;touch-action:manipulation;cursor:pointer}
+  #msg{margin-top:10px;min-height:22px;color:var(--accent);font-size:14px}
+  h3.sec{margin:14px 0 8px;font-size:14px;color:var(--accent)}
+  #shop{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:10px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px}
+  .card h3{margin:0;font-size:14px;color:var(--accent)}
+  .card .now{font-size:12px;color:#c8e08a}
+  .card .gain{font-size:12px;color:var(--mute)}
+  .card.bottleneck{border-color:#ff6a4a}
+  .card.best{box-shadow:0 0 0 2px var(--accent) inset}
+  .row{display:flex;gap:6px}
+  .row button:first-child{flex:1}
+  .row button.dbg{padding:6px 9px;color:var(--mute)}
+  small{color:var(--mute)}
+  /* palette */
+  .t{color:#f4f2c8}.d{color:#58642f}.s{color:#9aa57a}.h{color:#ffe14d}.g{color:#7ee05a}.y{color:#fff7a0}
+  .r{color:#ff6a4a}.w{color:#58b8ff}.m{color:#d9cc5c}.k{color:#e8e8e8}
+</style>
+</head>
+<body>
+<header>
+  <h1>🍋 LEMONADE FLOW LAB <small>— stand-alone playtest of the line-balancing phase</small></h1>
+  <button id="reset">Reset scenario</button>
+</header>
+<div class="wrap">
+  <div class="bar" id="tools"></div>
+  <div id="screen"><pre id="scr"></pre></div>
+  <div id="msg"></div>
+  <h3 class="sec">UPGRADES <small>(click a stage row in the screen, or use the buttons)</small></h3>
+  <div id="shop"></div>
+  <p><small>Goal: earn the most coins per second. The line only runs as fast as its slowest stage, so find the bottleneck, upgrade it, then find the next one. The same STAGES config and simulation are used in lemonade_tycoon.html, so this phase can be pasted straight back in.</small></p>
+</div>
+
+<script>
+'use strict';
+const W = 100, H = 28;
+const ch = new Array(W * H), co = new Array(W * H);
+const scr = document.getElementById('scr');
+
+/* ======================================================================
+   CONFIG  —  identical to lemonade_tycoon.html (copy back and forth)
+   lv(n, firstCost, growth, fx): n levels, level i costs firstCost*growth^(i-1)
+   value = coins this stage adds to each unit; a unit leaving the end of the
+           line sells for the sum of all stage values.
+   ====================================================================== */
+const lv = (n, c0, g, fx) => Array.from({ length: n }, (_, i) => Object.assign({ cost: Math.round(c0 * Math.pow(g, i)) }, fx(i + 1)));
+const STAGES = [
+  { id: 'inspect',  name: 'INSPECT',  title: 'Inspection',  value: 1.0, upgrade: { title: '🤖 Auto-Inspector',  levels: lv(6, 30, 1.7,  n => ({ rate: 1.0  * Math.pow(1.35, n - 1) })) } },
+  { id: 'grind',    name: 'GRIND',    title: 'Grinder',     value: 1.5, upgrade: { title: '⚡ Auto-Grinder',    levels: lv(6, 80, 1.75, n => ({ rate: 0.8  * Math.pow(1.35, n - 1) })) } },
+  { id: 'macerate', name: 'MACERATE', title: 'Maceration',  value: 1.0, upgrade: { title: '🛢 Extra Tanks',     levels: lv(6, 150, 1.8, n => ({ rate: 0.9  * Math.pow(1.35, n - 1) })) } },
+  { id: 'press',    name: 'PRESS',    title: 'Press',       value: 2.5, upgrade: { title: '🗜 Hydraulic Press', levels: lv(6, 250, 1.8, n => ({ rate: 0.8  * Math.pow(1.35, n - 1) })) } },
+  { id: 'pasteur',  name: 'PASTEUR',  title: 'Pasteurizer', value: 2.0, upgrade: { title: '♨ Heat Exchanger',   levels: lv(6, 400, 1.8, n => ({ rate: 0.85 * Math.pow(1.35, n - 1) })) } },
+  { id: 'qc',       name: 'FINAL QC', title: 'Final QC',    value: 3.0, upgrade: { title: '🔬 Auto-QC Lab',     levels: lv(6, 600, 1.8, n => ({ rate: 0.8  * Math.pow(1.35, n - 1) })) } },
+];
+const QUEUE_CAP = 20;
+const MILESTONES = [2, 5, 10, 20, 40];     // coins/s thresholds; the time each is first reached is logged
+const SCENARIOS = {
+  fresh:  { label: 'Fresh (all Lv 1, 150¢)', lvl: [1, 1, 1, 1, 1, 1], coins: 150 },
+  uneven: { label: 'Uneven (Lv 4/1/3/2/1/2, 200¢)', lvl: [4, 1, 3, 2, 1, 2], coins: 200 },
+  late:   { label: 'Late game (all Lv 4, 3000¢)', lvl: [4, 4, 4, 4, 4, 4], coins: 3000 },
+  maxed:  { label: 'Maxed (all Lv 6)', lvl: [6, 6, 6, 6, 6, 6], coins: 0 },
+};
+
+/* ---------- ASCII engine ---------- */
+function clear(){ ch.fill(' '); co.fill(''); }
+function put(x, y, s, c = 't'){
+  x = Math.floor(x); y = Math.floor(y);
+  if (y < 0 || y >= H) return;
+  for (let i = 0; i < s.length; i++){ const xx = x + i; if (xx < 0 || xx >= W || s[i] === ' ') continue; ch[y * W + xx] = s[i]; co[y * W + xx] = c; }
+}
+function box(x, y, w, h, c = 's'){
+  put(x, y, '┌' + '─'.repeat(Math.max(0, w - 2)) + '┐', c); put(x, y + h - 1, '└' + '─'.repeat(Math.max(0, w - 2)) + '┘', c);
+  for (let j = 1; j < h - 1; j++){ put(x, y + j, '│', c); put(x + w - 1, y + j, '│', c); }
+}
+const blink = (T, r = 3) => Math.floor(T * r) % 2 === 0;
+const esc = c => c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '&' ? '&amp;' : c;
+function render(){
+  const out = [];
+  for (let y = 0; y < H; y++){
+    let line = '', cur = null, buf = '';
+    for (let x = 0; x < W; x++){
+      const c = co[y * W + x] || 't';
+      if (c !== cur){ if (buf) line += `<span class="${cur}">${buf}</span>`; cur = c; buf = ''; }
+      buf += esc(ch[y * W + x]);
+    }
+    out.push(line + `<span class="${cur}">${buf}</span>`);
+  }
+  scr.innerHTML = out.join('\n');
+}
+function fit(){ scr.style.fontSize = Math.max(6, Math.min(24, (document.getElementById('screen').clientWidth - 20) / (W * 0.602))) + 'px'; }
+window.addEventListener('resize', fit);
+
+/* ======================================================================
+   GAME MODEL  (same functions as the tycoon; stage-specific code removed)
+   ====================================================================== */
+const stageOf = id => STAGES.find(s => s.id === id);
+const stageIdx = id => STAGES.findIndex(s => s.id === id);
+const maxLvl = id => stageOf(id).upgrade.levels.length;
+const plainName = t => t.replace(/^\S+\s/, '');
+const cumValue = i => STAGES.slice(0, i + 1).reduce((a, s) => a + s.value, 0);
+
+let G, SIM, scenario = 'fresh', speed = 1, paused = false, T = 0, msgT = 0, shopKey = '';
+const lvl = id => G.lvl[id] || 0;
+const rateAt = (id, l) => l > 0 ? stageOf(id).upgrade.levels[l - 1].rate : 0;
+const rateOf = id => rateAt(id, lvl(id));
+function newGame(sc){
+  const s = SCENARIOS[sc]; scenario = sc;
+  G = { coins: s.coins, lvl: {}, t: 0, earned: 0, bought: 0, wasted: 0, spent: 0, hist: [], mile: {}, lastHist: 0 };
+  STAGES.forEach((st, i) => G.lvl[st.id] = s.lvl[i]);
+  SIM = { buf: {}, util: {}, state: {}, income: 0 };
+  shopKey = '';
+}
+function say(s){ document.getElementById('msg').textContent = s; msgT = 7; }
+
+/* ---------- production-line simulation ---------- */
+function lineOf(levels){            // levels: id -> level; returns { rate, bott, income }
+  const c = STAGES.filter(s => (levels[s.id] || 0) > 0);
+  if (c.length < STAGES.length) { /* chain stops at first non-automated stage */ }
+  const chain = []; for (const s of STAGES){ if (!(levels[s.id] > 0)) break; chain.push(s); }
+  if (!chain.length) return { chain, rate: 0, bott: -1, income: 0 };
+  let b = 0; chain.forEach((s, i) => { if (rateAt(s.id, levels[s.id]) < rateAt(chain[b].id, levels[chain[b].id])) b = i; });
+  const rate = rateAt(chain[b].id, levels[chain[b].id]);
+  return { chain, rate, bott: b, income: rate * cumValue(chain.length - 1) };
+}
+const lineStats = () => lineOf(G.lvl);
+function simStep(dt){
+  const c = lineStats().chain; let sold = 0;
+  STAGES.forEach(s => { if (!c.includes(s)){ SIM.buf[s.id] = 0; SIM.state[s.id] = 'idle'; SIM.util[s.id] = 0; } });
+  c.forEach((s, i) => {
+    const want = rateOf(s.id) * dt, nxt = c[i + 1];
+    const avail = i === 0 ? want : Math.min(want, SIM.buf[s.id] || 0);
+    const room = nxt ? Math.max(0, QUEUE_CAP - (SIM.buf[nxt.id] || 0)) : Infinity;
+    const done = Math.max(0, Math.min(want, avail, room));
+    if (i > 0) SIM.buf[s.id] -= done; else SIM.buf[s.id] = 0;
+    if (nxt) SIM.buf[nxt.id] = (SIM.buf[nxt.id] || 0) + done;
+    else { const v = done * cumValue(i); G.coins += v; G.earned += v; sold += v; }
+    SIM.util[s.id] = (SIM.util[s.id] || 0) + ((want > 0 ? done / want : 0) - (SIM.util[s.id] || 0)) * Math.min(1, dt * 2);
+    SIM.state[s.id] = avail < want * .97 ? 'starved' : room < want * .97 ? 'blocked' : 'running';
+  });
+  SIM.income += (sold / dt - SIM.income) * Math.min(1, dt * 1.5);
+  G.t += dt;
+  if (G.t - G.lastHist >= 1){ G.lastHist = G.t; G.hist.push(SIM.income); if (G.hist.length > 80) G.hist.shift(); }
+  MILESTONES.forEach(m => { if (G.mile[m] === undefined && SIM.income >= m) G.mile[m] = G.t; });
+}
+
+/* ---------- upgrade analysis ---------- */
+function gainOf(id){                 // coins/s gained by buying the next level, and payback seconds
+  const l = lvl(id); if (l >= maxLvl(id)) return null;
+  const after = Object.assign({}, G.lvl, { [id]: l + 1 });
+  const dInc = lineOf(after).income - lineStats().income, cost = stageOf(id).upgrade.levels[l].cost;
+  return { dInc, cost, payback: dInc > 0 ? cost / dInc : Infinity, score: dInc / cost };
+}
+function bundle(){                   // when several stages tie for slowest, raising one alone gains nothing: price raising them all
+  const L = lineStats(); if (L.chain.length < 2) return null;
+  const B = L.chain.filter(s => Math.abs(rateOf(s.id) - L.rate) < 1e-9);
+  if (B.length < 2 || B.some(s => lvl(s.id) >= maxLvl(s.id))) return null;
+  const after = Object.assign({}, G.lvl); B.forEach(s => after[s.id] = lvl(s.id) + 1);
+  const dInc = lineOf(after).income - L.income, cost = B.reduce((a, s) => a + stageOf(s.id).upgrade.levels[lvl(s.id)].cost, 0);
+  return dInc > 1e-9 ? { ids: B.map(s => s.id), dInc, cost, payback: cost / dInc, score: dInc / cost } : null;
+}
+function bestBuy(){                  // { id (stage to click next), g (its gain), bundle? }
+  let best = null;
+  STAGES.forEach(s => { const g = gainOf(s.id); if (g && g.dInc > 1e-9 && (!best || g.score > best.g.score)) best = { id: s.id, g }; });
+  const b = bundle();
+  if (b && (!best || b.score > best.g.score)){
+    const id = b.ids.slice().sort((x, y) => stageOf(x).upgrade.levels[lvl(x)].cost - stageOf(y).upgrade.levels[lvl(y)].cost)[0];
+    return { id, g: Object.assign(gainOf(id), { dInc: b.dInc, cost: b.cost, payback: b.payback, score: b.score }), bundle: b.ids };
+  }
+  return best;
+}
+function buy(id, free = false){
+  const l = lvl(id); if (l >= maxLvl(id)) return;
+  const cost = stageOf(id).upgrade.levels[l].cost;
+  if (!free && G.coins < cost) return;
+  const L0 = lineStats(), before = L0.income, atBottleneck = L0.chain.some(s => s.id === id) && Math.abs(rateOf(id) - L0.rate) < 1e-9;
+  if (!free){ G.coins -= cost; G.spent += cost; G.bought++; }
+  G.lvl[id] = l + 1;
+  if (!free && lineStats().income <= before + 1e-9 && !atBottleneck){ G.wasted += cost; say(`💸 ${plainName(stageOf(id).upgrade.title)} → Lv ${l + 1}: no change in output (it wasn't the bottleneck). ${cost} coins wasted.`); }
+  else if (!free) say(`${plainName(stageOf(id).upgrade.title)} → Lv ${l + 1}  (+${(lineStats().income - before).toFixed(2)} coins/s${lineStats().income <= before + 1e-9 ? ' yet — other stages are tied for slowest, raise them too' : ''})`);
+  shopKey = '';
+}
+function debugLevel(id, d){ const l = lvl(id) + d; if (l >= 1 && l <= maxLvl(id)){ G.lvl[id] = l; shopKey = ''; } }
+
+/* ---------- main screen ---------- */
+const fmtT = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const SPARK = '▁▂▃▄▅▆▇█';
+function draw(){
+  clear(); box(0, 0, W, H, 'd');
+  const L = lineStats(), best = bestBuy();
+  put(2, 0, ' FLOW LAB · PRODUCTION LINE ', 'h');
+  put(3, 2, 'COINS', 'd'); put(9, 2, String(Math.floor(G.coins)).padEnd(8), 'h');
+  put(20, 2, 'LINE', 'd'); put(25, 2, `${L.rate.toFixed(2)} units/s`, 'g');
+  put(42, 2, 'INCOME', 'd'); put(49, 2, `${SIM.income.toFixed(2)} coins/s`, 'g');
+  put(68, 2, 'POTENTIAL', 'd'); put(78, 2, `${L.income.toFixed(2)}/s`, 'k');
+  const util = L.chain.length ? L.chain.reduce((a, s) => a + L.rate / rateOf(s.id), 0) / L.chain.length : 0;
+  put(3, 3, `TIME ${fmtT(G.t)}`, 's'); put(16, 3, `EARNED ${Math.floor(G.earned)}`, 's'); put(34, 3, `UPGRADES ${G.bought}`, 's');
+  put(50, 3, `EFFICIENCY ${Math.round(util * 100)}%`, util > .85 ? 'g' : util > .6 ? 'h' : 'r');
+  put(70, 3, `WASTED ${Math.floor(G.wasted)}¢`, G.wasted > 0 ? 'r' : 'd');
+
+  put(3, 5, 'STAGE', 'd'); put(16, 5, 'LEVEL', 'd'); put(25, 5, 'SPEED (units/s)', 'd'); put(55, 5, 'QUEUE', 'd'); put(70, 5, 'STATUS', 'd'); put(86, 5, 'NEXT UPGRADE', 'd');
+  const scale = Math.max(1, ...STAGES.map(s => rateOf(s.id))) * 1.1;
+  STAGES.forEach((s, i) => {
+    const y = 7 + i * 2, inChain = L.chain.includes(s), bn = L.chain.length > 1 && inChain && Math.abs(rateOf(s.id) - L.rate) < 1e-9, r = rateOf(s.id);
+    put(3, y, `[${i + 1}] ${s.name}`, bn ? 'r' : 't');
+    put(16, y, `Lv ${lvl(s.id)}/${maxLvl(s.id)}`, 't');
+    const n = Math.round(r / scale * 20); put(25, y, '█'.repeat(n) + '░'.repeat(20 - n), bn ? 'r' : 'g'); put(46, y, r.toFixed(2), 't');
+    if (inChain && i > 0){ const q = SIM.buf[s.id] || 0, qn = Math.round(Math.min(1, q / QUEUE_CAP) * 10); put(55, y, '▒'.repeat(qn) + '░'.repeat(10 - qn), q > QUEUE_CAP * .8 ? 'y' : 'd'); put(66, y, String(Math.round(q)).padStart(2), 't'); }
+    const st = SIM.state[s.id];
+    if (bn) put(70, y, 'BOTTLENECK', 'r');
+    else if (st === 'starved') put(70, y, `idle ${Math.round((1 - SIM.util[s.id]) * 100)}%`, 's');
+    else if (st === 'blocked') put(70, y, 'blocked', 'y');
+    else if (st === 'running') put(70, y, 'running', 'g');
+    const g = gainOf(s.id);
+    if (!g) put(86, y, 'MAX', 'd');
+    else { put(86, y, `${g.cost}¢ `, G.coins >= g.cost ? 'g' : 'd'); put(92, y, g.dInc > 1e-9 ? `+${g.dInc.toFixed(1)}` : '+0', g.dInc > 1e-9 ? 'y' : 'r'); }
+    if (best && (best.bundle ? best.bundle.includes(s.id) : best.id === s.id)) put(98, y, '★', blink(T, 3) ? 'h' : 'd');
+    if (inChain && i < L.chain.length - 1){ put(8, y + 1, '▼', 'd'); const p = Math.floor(T * 4 + i) % 3; put(10 + p * 2, y + 1, '·', 'd'); put(18 + ((T * 6 + i * 5) % 40), y + 1, '○', SIM.state[STAGES[i + 1].id] === 'running' ? 'y' : 'd'); }
+  });
+
+  // advice
+  const adv = [];
+  if (L.chain.length > 1){
+    const b = L.chain[L.bott], slack = L.chain.filter(s => s !== b).sort((p, q) => rateOf(q.id) - rateOf(p.id))[0];
+    adv.push([`BOTTLENECK: ${b.title} (${rateOf(b.id).toFixed(2)}/s) limits the whole line.`, 'r']);
+    adv.push([`${slack.title} only runs at ${Math.round(L.rate / rateOf(slack.id) * 100)}% capacity — more levels there are wasted for now.`, 's']);
+  }
+  if (best && best.bundle) adv.push([`★ TIED: raise ${best.bundle.map(i => stageOf(i).name).join(' + ')} together: ${best.g.cost}¢ → +${best.g.dInc.toFixed(2)}/s (payback ${best.g.payback < 1e5 ? fmtT(best.g.payback) : '∞'})`, 'h']);
+  else if (best) adv.push([`★ BEST BUY: ${plainName(stageOf(best.id).upgrade.title)} — ${best.g.cost}¢ for +${best.g.dInc.toFixed(2)} coins/s (pays back in ${best.g.payback < 1e5 ? fmtT(best.g.payback) : '∞'}).`, 'h']);
+  else adv.push(['No upgrade raises output any more (all maxed or capped by a maxed bottleneck).', 'd']);
+  adv.forEach(([t, c], k) => put(3, 20 + k, t.slice(0, 94), c));
+
+  // sparkline + milestones
+  const mx = Math.max(1, ...G.hist);
+  put(3, 24, 'INCOME', 'd'); put(10, 24, G.hist.map(v => SPARK[Math.min(7, Math.floor(v / mx * 7.99))]).join(''), 'g'); put(92, 24, `max ${mx.toFixed(0)}`, 'd');
+  put(3, 26, 'MILESTONES ' + MILESTONES.map(m => `${m}/s ${G.mile[m] !== undefined ? fmtT(G.mile[m]) : '--:--'}`).join('  ·  '), 's');
+}
+
+/* ---------- UI: tools + shop ---------- */
+const tools = document.getElementById('tools');
+function renderTools(){
+  tools.innerHTML = '';
+  const mk = (txt, fn, on) => { const b = document.createElement('button'); b.textContent = txt; if (on) b.className = 'on'; b.onclick = fn; tools.appendChild(b); return b; };
+  const lab = t => { const s = document.createElement('span'); s.className = 'lbl'; s.textContent = t; tools.appendChild(s); };
+  lab('Speed:'); [1, 5, 20, 100].forEach(v => mk(v + '×', () => { speed = v; renderTools(); }, speed === v && !paused));
+  mk(paused ? '▶ Play' : '⏸ Pause', () => { paused = !paused; renderTools(); }, false);
+  lab('Scenario:'); Object.keys(SCENARIOS).forEach(k => mk(SCENARIOS[k].label, () => { newGame(k); renderTools(); say('Scenario loaded.'); }, scenario === k));
+  lab('Coins:'); [100, 1000, 10000].forEach(v => mk('+' + v, () => { G.coins += v; shopKey = ''; }, false));
+}
+const shop = document.getElementById('shop');
+function renderShop(){
+  const L = lineStats(), best = bestBuy(), cards = STAGES.map(s => {
+    const l = lvl(s.id), n = maxLvl(s.id), g = gainOf(s.id), bn = L.chain.length > 1 && L.chain.includes(s) && Math.abs(rateOf(s.id) - L.rate) < 1e-9;
+    return { id: s.id, title: `${s.upgrade.title}  (Lv ${l}/${n})`, now: `Now ${rateOf(s.id).toFixed(2)}/s` + (g ? `  →  ${rateAt(s.id, l + 1).toFixed(2)}/s` : ''),
+      gain: g ? (g.dInc > 1e-9 ? `+${g.dInc.toFixed(2)} coins/s · payback ${g.payback < 1e5 ? fmtT(g.payback) : '∞'}` : (bn || (best && best.bundle && best.bundle.includes(s.id)) ? 'tied for slowest — raise all tied stages together' : '+0 coins/s — not the bottleneck')) : 'maxed',
+      cost: g ? g.cost : 0, bn, best: best && (best.bundle ? best.bundle.includes(s.id) : best.id === s.id), afford: g && G.coins >= g.cost };
+  });
+  const key = JSON.stringify(cards);
+  if (key === shopKey) return; shopKey = key;
+  shop.innerHTML = '';
+  cards.forEach(c => {
+    const d = document.createElement('div'); d.className = 'card' + (c.bn ? ' bottleneck' : '') + (c.best ? ' best' : '');
+    d.innerHTML = `<h3>${c.title}${c.bn ? '  ◄ BOTTLENECK' : ''}${c.best ? '  ★ BEST BUY' : ''}</h3><div class="now">${c.now}</div><div class="gain">${c.gain}</div>`;
+    const row = document.createElement('div'); row.className = 'row';
+    const b = document.createElement('button'); b.textContent = c.cost ? `Buy · ${c.cost} 🪙` : 'MAX'; b.disabled = !c.cost || !c.afford; b.onclick = () => buy(c.id);
+    const m = document.createElement('button'); m.className = 'dbg'; m.textContent = '−'; m.title = 'debug: free level down'; m.onclick = () => debugLevel(c.id, -1);
+    const p = document.createElement('button'); p.className = 'dbg'; p.textContent = '+'; p.title = 'debug: free level up'; p.onclick = () => debugLevel(c.id, 1);
+    row.append(b, m, p); d.appendChild(row); shop.appendChild(d);
+  });
+}
+scr.addEventListener('pointerdown', e => {
+  const r = scr.getBoundingClientRect(), cy = (e.clientY - r.top) / (r.height / H);
+  const i = Math.round((cy - 7) / 2); if (i >= 0 && i < STAGES.length && Math.abs(cy - (7 + i * 2)) < 1.2) buy(STAGES[i].id);
+});
+document.getElementById('reset').onclick = () => { newGame(scenario); renderTools(); say('Scenario reset.'); };
+
+/* ---------- loop ---------- */
+newGame('fresh'); fit(); renderTools();
+let last = performance.now(), acc = 0;
+function frame(now){
+  const dt = Math.min(.1, (now - last) / 1000); last = now; T += dt;
+  if (!paused){ let sim = dt * speed; while (sim > 0){ const s = Math.min(.1, sim); simStep(s); sim -= s; } }
+  if (msgT > 0 && (msgT -= dt) <= 0) document.getElementById('msg').textContent = '';
+  acc += dt; if (acc >= 1 / 20){ acc = 0; draw(); render(); renderShop(); }
+  requestAnimationFrame(frame);
+}
+window.__L = { get G(){ return G; }, get SIM(){ return SIM; }, buy, bundle, newGame, lineStats, bestBuy, gainOf, simStep, STAGES };
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
