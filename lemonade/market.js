@@ -1,8 +1,8 @@
-// Lemonade market: price vs. elastic demand, capped by supply (stock).
-// Pure logic, no I/O, so it can be dropped into the rest of the game.
-// Formulas follow DESIGN_NOTES.md sections 2 and 3.
+// Lemonade market, a straight port of the Universal Paperclips economy
+// (reference: index_3.html). Clips -> cups, wire -> lemons, AutoClippers ->
+// Auto Squeezers. Pure logic, no I/O. Formulas follow DESIGN_NOTES.md.
 
-const TICKS_PER_SECOND = 10;
+const TICKS_PER_SECOND = 10;   // sales roll every 100 ms, like the reference
 
 // ---- Demand (selling side) --------------------------------------------
 
@@ -20,85 +20,122 @@ function forecast(price, opts) {
 }
 
 // ---- Supply (making side) ----------------------------------------------
-// Lemons (bought) -> squeeze -> cups (stock) -> sold.
+// Lemons (bought by the crate) -> squeeze -> cups (stock) -> sold.
 
-const LEMON_REF_PRICE = 0.10;   // "normal" lemon price; trend labels compare to this
-const LEMON_FLOOR = 0.075;      // base price never decays below this
-const LEMON_SWING = 0.03;       // price wobbles +/- this around the base
-const LEMON_BATCH = 10;         // lemons per purchase
-const MAX_LEMONS = 200;
+const LEMON_SUPPLY = 1000;       // lemons per crate         (wireSupply)
+const LEMON_START_BASE = 20;     // base crate price         (wireBasePrice)
+const LEMON_FLOOR = 15;          // base never decays below  (wireBasePrice > 15)
+const LEMON_SWING = 6;           // price = base + 6*sin(n)  (wireAdjust)
+const LEMON_REF_PRICE = 20;      // "normal" crate price for CHEAP/PRICEY labels
 
-// Auto squeezer: level 1 is the purchase, levels 2-6 are the 5 upgrades.
-// AUTO_COSTS[i] is the price of going from level i to level i+1.
-// Same math as index_3.html: the first AutoClipper costs $5 and makes 1 clip/s
-// (clipperCost = 1.1^level + 5 after each purchase), and each "Improved
-// AutoClippers" boost adds +25% of the base rate (clipperBoost += .25).
-const AUTO_RATES = [0, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25];   // cups per second
-const AUTO_MAX = AUTO_RATES.length - 1;
-const AUTO_COST_BASE = 5;
+// Auto Squeezer = AutoClipper. Cost after each purchase: 1.1^count + 5.
+const SQUEEZER_BASE_COST = 5;
+const squeezerCost = (count) => (count === 0 ? SQUEEZER_BASE_COST : Math.pow(1.1, count) + 5);
+
+// "Improved AutoClippers" projects: clipperBoost += .25, .50, .75, then 5.
+// The reference pays in Operations; Operations are cut here, so the same
+// numbers are paid in dollars.
+const BOOSTS = [
+  { cost: 750,  add: 0.25 },
+  { cost: 2500, add: 0.50 },
+  { cost: 5000, add: 0.75 },
+  { cost: 6000, add: 5.00 },
+];
+
+// MegaClippers: unlocked at 75 AutoClippers (12,000 ops in the reference),
+// then cost 1.07^count * 1000 each and make 500 clips/s.
+const MEGA_UNLOCK_SQUEEZERS = 75;
+const MEGA_UNLOCK_COST = 12000;
+const MEGA_RATE = 500;
+const megaCost = (count) => Math.pow(1.07, count) * 1000;
 
 const newState = () => ({
-  cash: 0, stock: 0, lemons: 20, price: 0.25, mktLvl: 1,
-  autoLvl: 0,
-  maxStock: 100,          // cup storage cap
+  cash: 0, stock: 0, lemons: LEMON_SUPPLY, price: 0.25, mktLvl: 1,
+  adCost: 100,
+  squeezers: 0, boostLvl: 0, boost: 1, megaUnlocked: false, megas: 0,
   made: 0, sold: 0,
-  lemonBase: LEMON_REF_PRICE, lemonPrice: LEMON_REF_PRICE,
+  lemonBase: LEMON_START_BASE, lemonPrice: LEMON_START_BASE,
   _lemonWave: 0, _lemonTimer: 0,
-  _frac: 0,               // fractional auto-squeezing carried between ticks
 });
 
-// Squeeze one lemon into one cup (the button; also used by the auto squeezer).
-function squeeze(s) {
-  if (s.lemons < 1 || s.stock >= s.maxStock) return false;
-  s.lemons--; s.stock++; s.made++;
+// The button: 1 lemon -> 1 cup. Also used for auto production (fractional).
+function squeeze(s, n = 1) {
+  const made = Math.min(n, s.lemons);
+  if (made <= 0) return false;
+  s.lemons -= made; s.stock += made; s.made += made;
   return true;
 }
 
-const autoRate = (s) => AUTO_RATES[s.autoLvl];
-const autoCost = (s) => {
-  if (s.autoLvl >= AUTO_MAX) return null;
-  if (s.autoLvl === 0) return AUTO_COST_BASE;
-  return Math.round((Math.pow(1.1, s.autoLvl) + AUTO_COST_BASE) * 100) / 100;   // reference: 1.1^level + 5
-};
+// Cups per second from machines.
+const autoRate = (s) => s.boost * s.squeezers + s.megas * MEGA_RATE;
 
-// Buy the auto squeezer, or its next upgrade. Costs money.
-function buyAuto(s) {
-  const cost = autoCost(s);
+function buySqueezer(s) {
+  const cost = squeezerCost(s.squeezers);
+  if (s.cash < cost) return false;
+  s.cash -= cost; s.squeezers++;
+  return true;
+}
+
+const boostCost = (s) => (s.boostLvl < BOOSTS.length && s.squeezers >= 1 ? BOOSTS[s.boostLvl].cost : null);
+
+function buyBoost(s) {
+  const cost = boostCost(s);
   if (cost === null || s.cash < cost) return false;
-  s.cash -= cost; s.autoLvl++;
+  s.cash -= cost; s.boost += BOOSTS[s.boostLvl].add; s.boostLvl++;
+  return true;
+}
+
+function buyMega(s) {
+  if (s.squeezers < MEGA_UNLOCK_SQUEEZERS) return false;
+  if (!s.megaUnlocked) {
+    if (s.cash < MEGA_UNLOCK_COST) return false;
+    s.cash -= MEGA_UNLOCK_COST; s.megaUnlocked = true;
+    return true;
+  }
+  const cost = megaCost(s.megas);
+  if (s.cash < cost) return false;
+  s.cash -= cost; s.megas++;
   return true;
 }
 
 // ---- Lemon price: cheap times and expensive times -----------------------
-// Same idea as the wire price in the reference game: a sine wave around a
-// base price that updates at random moments, buying pushes the base up, and
-// the base slowly decays back down while you are not buying.
+// adjustWirePrice / buyWire from the reference. A sine wave around a base
+// price that updates at random moments; buying pushes the base up and it
+// slowly decays back down while you are not buying.
 
 function adjustLemonPrice(s, rng = Math.random) {
   s._lemonTimer++;
-  if (s._lemonTimer > 25 && s.lemonBase > LEMON_FLOOR) {   // ~2.5 s without buying
+  if (s._lemonTimer > 25 && s.lemonBase > LEMON_FLOOR) {    // 250 ticks of 10 ms
     s.lemonBase -= s.lemonBase / 1000;
     s._lemonTimer = 0;
   }
-  if (rng() < 0.02) {                                       // a new "market mood" ~every 5 s
-    s._lemonWave += 0.4;
-    s.lemonPrice = Math.ceil((s.lemonBase + LEMON_SWING * Math.sin(s._lemonWave)) * 100) / 100;
+  if (rng() < 0.14) {                                        // .015 per 10 ms tick
+    s._lemonWave++;
+    s.lemonPrice = Math.ceil(s.lemonBase + LEMON_SWING * Math.sin(s._lemonWave));
   }
 }
 
 function lemonTrend(s) {
-  if (s.lemonPrice <= LEMON_REF_PRICE - 0.015) return 'cheap';
-  if (s.lemonPrice >= LEMON_REF_PRICE + 0.015) return 'pricey';
+  if (s.lemonPrice <= LEMON_REF_PRICE - 3) return 'cheap';
+  if (s.lemonPrice >= LEMON_REF_PRICE + 3) return 'pricey';
   return 'normal';
 }
 
-// Buy a batch of lemons at the current price. Returns false if you can't.
-function buyLemons(s, n = LEMON_BATCH) {
-  const cost = n * s.lemonPrice;
-  if (s.cash < cost || s.lemons + n > MAX_LEMONS) return false;
-  s.cash -= cost; s.lemons += n;
+// Buy a crate of lemons at the current price.
+function buyLemons(s) {
+  if (s.cash < s.lemonPrice) return false;
+  s.cash -= s.lemonPrice; s.lemons += LEMON_SUPPLY;
   s._lemonTimer = 0;
-  s.lemonBase += s.lemonBase * 0.0025 * n / LEMON_BATCH;    // buying pushes the price up
+  s.lemonBase += 0.05;
+  return true;
+}
+
+// "Beg for More Wire" in the reference: if you are broke, out of lemons and out
+// of cups, a free crate is offered so the game can never soft-lock.
+const isStuck = (s) => s.lemons < 1 && s.stock < 1 && s.cash < s.lemonPrice;
+function begForLemons(s) {
+  if (!isStuck(s)) return false;
+  s.lemons = LEMON_SUPPLY;
   return true;
 }
 
@@ -107,10 +144,7 @@ function buyLemons(s, n = LEMON_BATCH) {
 // Advance one tick (1/10 s). `rng` is injectable for tests.
 function tick(s, rng = Math.random) {
   adjustLemonPrice(s, rng);
-
-  // Auto squeezer: makes cups only while it has lemons and room.
-  s._frac += autoRate(s) / TICKS_PER_SECOND;
-  while (s._frac >= 1 - 1e-9) { s._frac = Math.max(0, s._frac - 1); if (!squeeze(s)) { s._frac = 0; break; } }
+  squeeze(s, autoRate(s) / TICKS_PER_SECOND);
 
   // Demand: a chance of a sale this tick, sale size grows with demand.
   const d = demand(s.price, { mktLvl: s.mktLvl });
@@ -118,18 +152,16 @@ function tick(s, rng = Math.random) {
   if (rng() < d / 100) {
     sold = Math.min(unitsPerSale(d), s.stock);   // stock caps sales
     s.stock -= sold;
-    s.cash += sold * s.price;
+    s.cash = Math.floor((s.cash + sold * s.price) * 1000) / 1000;
     s.sold += sold;
   }
   return { demand: d, sold };
 }
 
-const marketingCost = (lvl) => 100 * Math.pow(2, lvl - 1);
-
+// Marketing: each level costs double the last (starts at 100), +10% demand.
 function buyMarketing(s) {
-  const cost = marketingCost(s.mktLvl);
-  if (s.cash < cost) return false;
-  s.cash -= cost; s.mktLvl++;
+  if (s.cash < s.adCost) return false;
+  s.cash -= s.adCost; s.mktLvl++; s.adCost = Math.floor(s.adCost * 2);
   return true;
 }
 
@@ -143,8 +175,9 @@ function clearingPrice(production, opts) {
   return 100;
 }
 
-const api = { TICKS_PER_SECOND, LEMON_BATCH, LEMON_REF_PRICE, MAX_LEMONS, AUTO_RATES, AUTO_MAX,
-  demand, unitsPerSale, forecast, newState, tick, squeeze, autoRate, autoCost, buyAuto,
-  adjustLemonPrice, lemonTrend, buyLemons, marketingCost, buyMarketing, setPrice, clearingPrice };
+const api = { TICKS_PER_SECOND, LEMON_SUPPLY, LEMON_REF_PRICE, BOOSTS, MEGA_UNLOCK_SQUEEZERS, MEGA_UNLOCK_COST, MEGA_RATE,
+  demand, unitsPerSale, forecast, newState, tick, squeeze, autoRate, squeezerCost, buySqueezer,
+  boostCost, buyBoost, megaCost, buyMega, adjustLemonPrice, lemonTrend, buyLemons, isStuck, begForLemons,
+  buyMarketing, setPrice, clearingPrice };
 if (typeof module !== "undefined") module.exports = api;
 else window.LemonadeMarket = api;

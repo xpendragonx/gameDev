@@ -12,6 +12,9 @@
   <button id="squeeze">[s] Squeeze Lemon</button>
   <button id="buy">[b] Buy Lemons</button>
   <button id="auto">[a] Auto Squeezer</button>
+  <button id="boost">[u] Improve Squeezers</button>
+  <button id="beg">[r] Beg for Lemons</button>
+  <button id="mega">[g] Mega Squeezer</button>
   <button id="down">[-] price</button>
   <button id="up">[+] price</button>
   <button id="mkt">[m] marketing</button>
@@ -21,12 +24,12 @@
 <script>
   const m = LemonadeMarket, s = m.newState();
   const act = {
-    squeeze: () => m.squeeze(s), buy: () => m.buyLemons(s), auto: () => m.buyAuto(s),
+    squeeze: () => m.squeeze(s), buy: () => m.buyLemons(s), auto: () => m.buySqueezer(s), boost: () => m.buyBoost(s), mega: () => m.buyMega(s), beg: () => m.begForLemons(s),
     up: () => m.setPrice(s, s.price + 0.01), down: () => m.setPrice(s, s.price - 0.01),
     mkt: () => m.buyMarketing(s),
   };
   for (const id in act) document.getElementById(id).onclick = act[id];
-  const keys = { s: 'squeeze', ' ': 'squeeze', b: 'buy', a: 'auto', '+': 'up', '=': 'up', '-': 'down', m: 'mkt' };
+  const keys = { s: 'squeeze', ' ': 'squeeze', b: 'buy', a: 'auto', u: 'boost', g: 'mega', r: 'beg', '+': 'up', '=': 'up', '-': 'down', m: 'mkt' };
   addEventListener('keydown', (e) => { if (keys[e.key]) { e.preventDefault(); act[keys[e.key]](); } });
   const draw = () => { document.getElementById('screen').textContent = LemonadeView.render(s, m); };
   setInterval(() => { m.tick(s); draw(); }, 1000 / m.TICKS_PER_SECOND);

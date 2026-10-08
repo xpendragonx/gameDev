@@ -110,51 +110,40 @@ same sales. It cost `100 × (2^7 − 1) = 12,700` to get there. Doubling cost fo
 - **Stock caps sales.** The formula has no supply term. The cap is in the sell step.
 - **Marketing is a trade-off,** not a free boost.
 
-## 2.6 Supply side: lemons, squeezing and the variable lemon price
+## 2.6 Supply side: a straight port of the reference economy
 
-Cups come from lemons. This gives the player a second price to watch: the
-price they **pay** for lemons.
+Goal: play like Universal Paperclips, same ramp in production and sales
+pace, with cups instead of clips. So the supply side copies the reference
+numbers instead of inventing new ones.
 
-- **Squeeze a Cup button:** 1 lemon becomes 1 cup in stock.
-- **Auto Squeezer:** costs money ($5), then squeezes 1 cup per second. It
-  stops when lemons run out or cup storage is full.
-- **5 upgrade levels:** each costs money and adds 25% of the base rate.
-
-Same math as the reference game. An AutoClipper costs `5`, then
-`1.1^level + 5` after each purchase, and makes 1 clip/s. The "Improved
-AutoClippers" projects add `+.25` to `clipperBoost`. Here the cost formula
-is used as is and each level uses the +25% step.
-
-| Level | Rate (cups/s) | Cost to reach |
+| Reference | Lemonade | Numbers |
 |---|---|---|
-| 1 (buy) | 1.00 | $5.00 |
-| 2 | 1.25 | $6.10 |
-| 3 | 1.50 | $6.21 |
-| 4 | 1.75 | $6.33 |
-| 5 | 2.00 | $6.46 |
-| 6 | 2.25 | $6.61 |
+| Wire | Lemons | Start with 1,000. A crate adds 1,000. 1 lemon per cup. |
+| Make Paperclip button | Squeeze Lemon button | 1 lemon becomes 1 cup |
+| AutoClipper | Auto Squeezer | $5, then `1.1^count + 5`. +1 cup/s each. No limit. |
+| Improved AutoClippers (Operations) | Improve Squeezers | +25%, +50%, +75%, then +500%. Paid in **dollars** (750, 2,500, 5,000, 6,000) because Operations are cut. |
+| MegaClippers | Mega Squeezers | Unlock at 75 squeezers for $12,000, then `1.07^count * 1000` each, 500 cups/s each |
+| Marketing | Marketing | $100, doubles each level, +10% demand |
+| Beg for More Wire | Beg for Lemons | Free crate if broke with no lemons and no cups |
 
-**Variable lemon price.** The price to buy lemons moves, so there are
-*expensive times* and *cheap times* to buy. It copies the wire price in
-the reference game (`adjustWirePrice`, `buyWire`):
+**Variable lemon price** (`adjustWirePrice`, `buyWire`). The crate price moves, so
+there are expensive and cheap times to buy:
 
 ```
-price = ceil(100 * (base + 0.03 * sin(wave))) / 100
-wave += 0.4 at random moments (about every 5 seconds)
-base  = 0.10 to start
+price = ceil(base + 6 * sin(wave))     base starts at $20
+wave += 1 at random moments            (about 1.5 times a second in the reference)
+buying a crate: base += 0.05           buying pushes the price up
+no purchase for 2.5 s: base -= base/1000, down to a floor of $15
 ```
 
-- The price swings between roughly $0.07 and $0.13 around the base.
-- **Buying pushes the base up** (+0.25% per 10 lemons), so spamming the buy
-  button costs more.
-- **Base decays slowly** back toward a floor of $0.075 while the player is not buying.
-- The UI labels the price CHEAP or PRICEY, compared with a normal $0.10.
-- Lemons come in batches of 10 and storage holds 200, so the player can
-  stock up when cheap and wait out the expensive times.
+- The crate price swings between about $14 and $26.
+- The UI marks CHEAP at $17 or less and PRICEY at $23 or more.
+- At $20 a crate, a lemon costs about $0.02. The cup sells for $0.25 at the
+  start and lower later, so margins are thin like in the reference.
 
-Margin check: a cup sells for $0.25 and costs one lemon, $0.07 to $0.13. If
-the player drops the cup price toward $0.10 to clear stock, a pricey lemon
-wipes out the profit. Supply cost and demand now pull on the same decision.
+**Cut from the reference:** Operations, Creativity, Trust and the project list.
+The boosts and Mega unlock were paid in Operations, so they are paid in
+dollars here. Those prices are stand-ins and may need tuning.
 
 ## 3. Stages
 
