@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Apple Juice Factory</title>
+<style>
+  :root{--bg:#0c121d;--panel:#162033;--line:#26324b;--ink:#e8eefc;--mute:#8fa0c0;--accent:#ffb83d}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:ui-monospace,Menlo,Consolas,monospace}
+  header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;justify-content:space-between;padding:12px 16px}
+  h1{margin:0;font-size:18px;letter-spacing:.5px}
+  .ctl,.stats{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:13px;color:var(--mute)}
+  .stats b{color:var(--accent)}
+  button{font:inherit;font-size:13px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  input[type=range]{accent-color:var(--accent);vertical-align:middle}
+  .wrap{padding:0 16px}
+  canvas{display:block;width:100%;height:auto;max-width:1600px;margin:0 auto;border:1px solid var(--line);border-radius:10px;background:#0e1626}
+  #cap{display:flex;gap:14px;align-items:flex-start;max-width:1600px;margin:12px auto 0;padding:12px 16px;background:var(--panel);border:1px solid var(--line);border-radius:10px;min-height:84px}
+  #capN{flex:none;width:38px;height:38px;border-radius:50%;background:var(--accent);color:#1a1200;font-weight:800;display:grid;place-items:center;font-size:17px}
+  #capT{margin:0 0 4px;font-size:16px}
+  #capD{margin:0;color:var(--mute);font-size:14px;line-height:1.5}
+  #dots{display:flex;flex-wrap:wrap;gap:6px;max-width:1600px;margin:12px auto 20px}
+  #dots button{padding:4px 9px;font-size:12px}
+  #dots button.on{background:var(--accent);color:#1a1200;border-color:var(--accent);font-weight:700}
+  .hint{max-width:1600px;margin:0 auto 24px;color:var(--mute);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🍎 APPLE JUICE FACTORY — live line</h1>
+  <div class="stats">Apples in: <b id="sA">0</b> · Boxes shipped: <b id="sB">0</b> · Bottles shipped: <b id="sT">0</b></div>
+  <div class="ctl">
+    <button id="pp">⏸ Pause</button>
+    <label>Speed <input id="spd" type="range" min="0.25" max="4" step="0.25" value="1"> <span id="spv">1×</span></label>
+    <button id="rst">↺ Restart</button>
+  </div>
+</header>
+<div class="wrap">
+  <canvas id="cv" width="1600" height="1000"></canvas>
+  <section id="cap"><div id="capN">1</div><div><h2 id="capT"></h2><p id="capD"></p></div></section>
+  <nav id="dots"></nav>
+  <p class="hint">The ringed apple is the one we follow. Click a stage button to jump the follow-apple to that stage.</p>
+</div>
+
+<script>
+'use strict';
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const W = 1600, H = 1000;
+const dpr = Math.min(2, window.devicePixelRatio || 1);
+cv.width = W * dpr; cv.height = H * dpr;
+ctx.scale(dpr, dpr);
+
+/* ---------- stages ---------- */
+const STAGES = [
+  ['Inspection', 'Apples ride a conveyor to the inspection point. They tumble backwards against the belt, so wet leaves and other unwanted material stick to the belt and are carried away.', [10,60,360,150]],
+  ['Silos', 'The apples are stored in silos for several hours before juice-making begins.', [375,40,150,150]],
+  ['Stepped chute', 'A stepped chute slows the descent so the apples are not bruised on the way down.', [530,120,170,150]],
+  ['Washing', 'A first water bath eliminates pebbles (some apples were picked up off the ground). A shower of cool water completes the wash.', [700,150,305,170]],
+  ['Grinder', 'The apples are cut into little pieces, producing "gratings" (mash). Enzymes are added to break down the cell structure for maximum juice extraction.', [1005,150,130,170]],
+  ['Maceration', 'The gratings rest in maceration reservoirs for 60 to 90 minutes while the enzymes work (time-lapsed here).', [1150,150,330,190]],
+  ['Press', 'The gratings are pumped into a powerful hydraulic press. Filter sleeves hold back the skins, seeds and stems; only juice flows out.', [1395,360,200,215]],
+  ['Filter + QC', 'Quality control is strict at every stage: samples are drawn off to check the parameters. The juice is filtered a first time, and the smallest unwanted particles are held back by a sieve.', [1170,520,300,160]],
+  ['Reservoir', 'Juice flows from one stage to the next through immense reservoirs.', [1010,430,150,230]],
+  ['Pasteurizer', 'Juice enters the heat exchanger at 22 °C, is heated to 88 °C, then cooled back down to 50 °C.', [775,520,225,160]],
+  ['Ultrafiltration', 'Enzymes hydrate the pectin to ease the second filtration. Membranes with microscopic pores retain the smallest particles — the juice is now perfectly clear.', [555,520,215,160]],
+  ['Final QC', 'Clarity, flavor, color and natural fruit-sugar content are all verified.', [395,430,160,230]],
+  ['Sterile storage', 'Pressing happens in October, so juice is kept in sterile tanks (110,000 L each) to be bottled through the year. No preserving agent is added.', [165,430,225,240]],
+  ['Drink boxes', 'Small drinking containers are filled at 100 a minute and hermetically sealed. Two small sprays of hot glue secure the straw to the side.', [140,680,730,110]],
+  ['Bottles', 'In a white sterile room, bottles are washed and disinfected with hydrogen peroxide, rinsed with sterile water, filled with pasteurized juice (120 a minute) and capped.', [140,810,780,150]],
+  ['Label & ship', 'Bottles are labeled and shipped. 20,000–40,000 tons of apples become juice every year, and thanks to perfect preservation it can be enjoyed any time of year.', [930,680,665,290]],
+];
+
+/* ---------- paths: [x, y, state-of-next-segment, speed-mult, stage] ---------- */
+const MAIN_WP = [
+  [110,150,'apple',.8,0],[360,150,'apple',.8,0],
+  [380,150,'apple',.5,1],[520,150,'apple',.5,1],
+  [540,150,'apple',1,2],[570,150,'apple',1,2],[570,175,'apple',1,2],[610,175,'apple',1,2],[610,200,'apple',1,2],
+  [650,200,'apple',1,2],[650,225,'apple',1,2],[690,225,'apple',1,2],[690,250,'apple',1,2],
+  [700,250,'apple',1,3],[860,250,'clean',1,3],[1000,250,'clean',1,3],
+  [1010,250,'clean',1,4],[1070,250,'mash',1,4],
+  [1150,250,'mash',.35,5],[1480,250,'mash',.35,5],
+  [1480,420,'mash',1,6],[1480,500,'juice',1,6],
+  [1480,600,'juice',1,7],[1150,600,'juice',1,8],[1000,600,'juice',1,9],[780,600,'juice',1,10],
+  [600,600,'clear',1,10],[560,600,'clear',1,11],[400,600,'clear',.6,12],[160,600,'clear',1,12],
+  [160,700,'clear',1,13]
+];
+const A_WP = [   // drink boxes
+  [160,700,'clear',1,13],[160,740,'ebox',.9,13],[430,740,'box',.9,13],[640,740,'boxs',.9,13],
+  [820,740,'boxst',.9,13],[1250,740,'boxst',.9,15],[1390,740,'boxst',.9,15]
+];
+const B_WP = [   // bottles
+  [160,700,'clear',1,14],[160,860,'ebottle',1,14],[480,860,'wbottle',1,14],[700,860,'bottle',1,14],
+  [860,860,'bottlec',1,14],[940,860,'bottlec',1,15],[1060,860,'bottlel',1,15],[1390,860,'bottlel',1,15]
+];
+function segs(wp){
+  const o = [];
+  for (let i = 0; i < wp.length - 1; i++){
+    const a = wp[i], b = wp[i+1];
+    o.push({ax:a[0],ay:a[1],bx:b[0],by:b[1],len:Math.hypot(b[0]-a[0],b[1]-a[1]),state:a[2],mul:a[3],stage:a[4]});
+  }
+  return o;
+}
+const MAIN = segs(MAIN_WP), LA = segs(A_WP), LB = segs(B_WP);
+const BASE = 160;   // px per simulated second
+
+/* ---------- state ---------- */
+let T = 0, speed = 1, paused = false;
+let parts = [], leaves = [], spawnT = 0, leafT = 0, laneToggle = 0, pid = 0;
+let cA = 0, cB = 0, cT = 0, tracked = null, activeStage = -1;
+const APPLE_COLS = ['#d63a3a','#c92f3f','#e04b2e','#d63a3a','#8fc14b'];
+
+function spawn(trackIt){
+  const p = {path:MAIN,i:0,d:0,col:APPLE_COLS[(Math.random()*APPLE_COLS.length)|0],id:pid++,track:!!trackIt};
+  parts.push(p); cA++;
+  if (trackIt) tracked = p;
+  return p;
+}
+function spawnAtStage(s){
+  for (const path of [MAIN, LA, LB]){
+    const i = path.findIndex(g => g.stage === s);
+    if (i >= 0){
+      const p = {path,i,d:0,col:APPLE_COLS[0],id:pid++,track:true};
+      parts.push(p); tracked = p; return;
+    }
+  }
+}
+function reset(){
+  parts = []; leaves = []; T = 0; spawnT = 0; leafT = 0; cA = cB = cT = 0; tracked = null;
+  for (let k = 0; k < 900; k++) step(0.05, true);     // pre-warm so the line is already full
+  spawn(true);
+}
+function posOf(p){
+  const g = p.path[p.i], t = p.d / g.len;
+  return [g.ax + (g.bx - g.ax) * t, g.ay + (g.by - g.ay) * t, g];
+}
+function advance(p, dt){
+  let mv = BASE * p.path[p.i].mul * dt;
+  while (mv > 0){
+    const g = p.path[p.i], rem = g.len - p.d;
+    if (mv < rem){ p.d += mv; mv = 0; }
+    else {
+      mv -= rem; p.i++; p.d = 0;
+      if (p.i >= p.path.length){
+        if (p.path === MAIN){ p.path = (laneToggle++ % 2) ? LB : LA; p.i = 0; }
+        else return false;
+      }
+    }
+  }
+  return true;
+}
+function step(dt, silent){
+  T += dt;
+  spawnT -= dt;
+  if (spawnT <= 0){ spawn(false); spawnT = 0.5 + Math.random() * 0.15; }
+  leafT -= dt;
+  if (leafT <= 0){ leaves.push({x:112,y:143,vy:0,r:Math.random()*6}); leafT = 0.7 + Math.random() * 0.8; }
+  for (const l of leaves){
+    if (l.x < 356) l.x += BASE * dt; else { l.vy += 400 * dt; l.y += l.vy * dt; l.x += 20 * dt; }
+  }
+  leaves = leaves.filter(l => l.y < 200);
+  parts = parts.filter(p => {
+    const alive = advance(p, dt);
+    if (!alive){
+      if (p.path === LA) cB++; else cT++;
+      if (p === tracked){ tracked = null; if (!silent) spawn(true); }
+    }
+    return alive;
+  });
+}
+
+/* ---------- drawing helpers ---------- */
+const FONT = 'ui-monospace,Menlo,Consolas,monospace';
+function rect(x,y,w,h,f,s,r=6,lw=2){
+  ctx.beginPath(); ctx.roundRect(x,y,w,h,r);
+  if (f){ ctx.fillStyle = f; ctx.fill(); }
+  if (s){ ctx.strokeStyle = s; ctx.lineWidth = lw; ctx.stroke(); }
+}
+function circ(x,y,r,f,s,lw=2){
+  ctx.beginPath(); ctx.arc(x,y,r,0,6.2832);
+  if (f){ ctx.fillStyle = f; ctx.fill(); }
+  if (s){ ctx.strokeStyle = s; ctx.lineWidth = lw; ctx.stroke(); }
+}
+function line(x1,y1,x2,y2,c,w){
+  ctx.strokeStyle = c; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+}
+function txt(s,x,y,size=13,col='#8fa0c0',al='center',wt='600'){
+  ctx.font = `${wt} ${size}px ${FONT}`; ctx.fillStyle = col; ctx.textAlign = al; ctx.textBaseline = 'middle';
+  ctx.fillText(s,x,y);
+}
+function liquid(x,y,w,h,col,lv,amp=2,r=6){
+  const top = y + h * (1 - lv);
+  ctx.save(); ctx.beginPath(); ctx.roundRect(x,y,w,h,r); ctx.clip();
+  ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x,y+h); ctx.lineTo(x,top);
+  for (let i = 0; i <= w; i += 4) ctx.lineTo(x + i, top + Math.sin(i * .15 + T * 3) * amp);
+  ctx.lineTo(x+w,y+h); ctx.closePath(); ctx.fill(); ctx.restore();
+}
+function tank(x,y,w,h,col,lv,amp){
+  rect(x,y,w,h,'rgba(20,30,50,.85)','#5b6a8c',8);
+  liquid(x+2,y+2,w-4,h-4,col,lv,amp,6);
+  line(x+w*.18,y+10,x+w*.18,y+h-10,'rgba(255,255,255,.18)',3);
+}
+function drops(x,y0,y1,n,sp,col,v,r=1.6){
+  ctx.fillStyle = col; const L = y1 - y0;
+  for (let i = 0; i < n; i++){
+    const f = ((T * v / L) + i / n) % 1;
+    const xx = x + (((i * 53) % 100) / 100 - .5) * sp * f;
+    ctx.beginPath(); ctx.arc(xx, y0 + f * L, r, 0, 6.2832); ctx.fill();
+  }
+}
+
+/* ---------- pipes & belts ---------- */
+function drawPath(path){
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const g of path){
+    const juicy = g.state === 'mash' || g.state === 'juice' || g.state === 'clear';
+    const col = g.state === 'mash' ? '#8a6a45' : g.state === 'juice' ? '#c98a2b' : '#f2c14e';
+    ctx.setLineDash([]);
+    if (juicy){
+      line(g.ax,g.ay,g.bx,g.by,'#1c2538',20);
+      line(g.ax,g.ay,g.bx,g.by,col,11);
+      ctx.setLineDash([6,14]); ctx.lineDashOffset = -T * BASE * g.mul;
+      line(g.ax,g.ay,g.bx,g.by,'rgba(255,255,255,.35)',3);
+    } else {
+      line(g.ax,g.ay,g.bx,g.by,'#2a3247',14);
+      ctx.setLineDash([5,11]); ctx.lineDashOffset = -T * BASE * g.mul;
+      line(g.ax,g.ay,g.bx,g.by,'#54607c',3);
+    }
+    ctx.setLineDash([]);
+  }
+}
+
+/* ---------- stations (behind pipes) ---------- */
+function drawBack(){
+  // stage frames
+  STAGES.forEach((s,i) => {
+    const [x,y,w,h] = s[2], on = i === activeStage;
+    rect(x,y,w,h,on ? 'rgba(255,184,61,.07)' : 'rgba(255,255,255,.015)', on ? '#ffb83d' : 'rgba(143,160,192,.18)', 12, on ? 2.5 : 1);
+    circ(x+16,y+16,10,on ? '#ffb83d' : '#26324b');
+    txt(String(i+1),x+16,y+16.5,11,on ? '#1a1200' : '#8fa0c0','center','800');
+    txt(s[0],x+32,y+16,13,on ? '#ffd27a' : '#8fa0c0','left','700');
+  });
+
+  // 1 truck + inspector
+  rect(14,96,70,46,'#34415e','#5b6a8c',4); rect(84,110,26,32,'#34415e','#5b6a8c',4);
+  circ(30,146,8,'#10151f','#5b6a8c'); circ(92,146,8,'#10151f','#5b6a8c');
+  for (let i = 0; i < 6; i++) circ(26 + i*10,94 - (i%2)*3,6,i%3===0?'#8fc14b':'#d63a3a');
+  const ix = 250;
+  circ(ix,96,9,'#e9c9a0'); rect(ix-9,106,18,22,'#3d6bb3',null,4);
+  line(ix-9,112,ix-20,124,'#e9c9a0',4); line(ix+9,112,ix+20,124,'#e9c9a0',4);
+  txt('👁',ix,96,12,'#222','center','400');
+  ctx.fillStyle = `rgba(255,220,120,${.08 + .06*Math.sin(T*8)})`;
+  ctx.beginPath(); ctx.moveTo(ix-4,128); ctx.lineTo(ix-45,148); ctx.lineTo(ix+45,148); ctx.closePath(); ctx.fill();
+  rect(330,186,48,22,'#202a40','#5b6a8c',3); txt('trash',354,197,10,'#8fa0c0');
+
+  // 2 silos
+  for (const sx of [395,455]){
+    rect(sx,70,52,76,'#2b3550','#5b6a8c',6);
+    ctx.fillStyle = '#d63a3a';
+    for (let k = 0; k < 14; k++) circ(sx+8+(k*11)%38, 138 - ((k*7)%5)*10 - Math.floor(k/4)*4, 5, k%4===0?'#8fc14b':'#d63a3a');
+    line(sx+8,76,sx+8,140,'rgba(255,255,255,.15)',3);
+  }
+  txt('zZz',500,66,12,'#8fa0c0'); txt('hours',480,48,10,'#8fa0c0');
+
+  // 4 wash tank
+  rect(700,222,152,88,'rgba(16,48,74,.9)','#5b6a8c',8);
+  liquid(702,224,148,84,'rgba(54,150,230,.55)',.8,3);
+  for (let k = 0; k < 4; k++){
+    const py = 258 + ((T*35 + k*17) % 42);
+    circ(722+k*36,py,4,'#8b93a6');
+  }
+  for (let k = 0; k < 5; k++) circ(715+k*30, 300 - ((T*22 + k*19) % 50), 2, 'rgba(255,255,255,.4)');
+  txt('pebbles sink',776,325,10,'#8fa0c0');
+  line(870,190,995,190,'#7d8bad',4);
+
+  // 5 grinder housing
+  rect(1015,220,112,64,'#2c3650','#5b6a8c',6);
+  ctx.save(); ctx.translate(1070,250); ctx.rotate(T*9);
+  for (let k = 0; k < 4; k++){ ctx.rotate(1.5708); rect(-3,-26,6,22,'#c9d3ea',null,2); }
+  ctx.restore(); circ(1070,250,4,'#5b6a8c');
+  ctx.fillStyle = '#5a6a9a'; ctx.beginPath(); ctx.moveTo(1103,176); ctx.lineTo(1127,176); ctx.lineTo(1121,200); ctx.lineTo(1109,200); ctx.closePath(); ctx.fill();
+  drops(1115,202,236,3,2,'#a7ffd0',60);
+
+  // 6 maceration tanks
+  for (const tx of [1160,1270,1380]) {
+    tank(tx,185,82,140,'rgba(150,115,70,.9)',.8,2.5);
+    const cx = tx+41, cy = 215;
+    circ(cx,cy,10,'rgba(0,0,0,.35)','#cdd6ee',1.5);
+    line(cx,cy,cx+7*Math.cos(T*3),cy+7*Math.sin(T*3),'#cdd6ee',2);
+  }
+  txt('60–90 min',1430,168,11,'#ffd27a','center','700');
+
+  // 7 press
+  rect(1410,395,140,165,'#232d44','#5b6a8c',8);
+  const py = 402 + (Math.sin(T*1.3)+1)/2*52;
+  line(1480,396,1480,py,'#9aa7c2',6); rect(1420,py,120,10,'#b7c3dc',null,3);
+  for (let k = 0; k < 5; k++) rect(1428+k*22,450,12,70,'rgba(210,190,150,.35)','#8d7b58',3,1);
+  txt('sleeves',1443,540,10,'#8fa0c0');
+  rect(1555,505,38,52,'#202a40','#5b6a8c',3); txt('waste',1574,515,9,'#8fa0c0');
+  for (let k = 0; k < 4; k++) circ(1562+(k*9)%28, 548 - ((T*8 + k*5)%12) - (k%2)*6, 3, '#8d7b58');
+
+  // 8 sieve + QC
+  rect(1320,562,40,76,'#232d44','#5b6a8c',4);
+  ctx.strokeStyle = 'rgba(200,215,255,.55)'; ctx.lineWidth = 1;
+  for (let k = 0; k < 8; k++){ line(1324,566+k*9,1356,566+k*9,'rgba(200,215,255,.5)',1); }
+  for (let k = 0; k < 4; k++) line(1328+k*8,566,1328+k*8,634,'rgba(200,215,255,.5)',1);
+  txt('sieve',1340,652,10,'#8fa0c0');
+  line(1220,608,1220,640,'#7d8bad',3);
+  rect(1210,640,20,32,'rgba(255,255,255,.08)','#cdd6ee',3);
+  liquid(1212,652,16,18,'#ffd54a',.9,1,3);
+  circ(1258,654,10,null,'#cdd6ee',2.5); line(1265,661,1274,670,'#cdd6ee',3);
+  txt('QC',1220,684,11,'#8fa0c0');
+  if (Math.sin(T*3) > 0) txt('✔',1258,654,12,'#6be28c','center','800');
+
+  // 9 reservoir
+  tank(1040,470,92,130,'rgba(201,138,43,.9)',.78,2.5);
+
+  // 10 pasteurizer
+  rect(780,550,110,100,'rgba(70,140,230,.22)','#4a82d6',6);
+  rect(890,550,110,100,'rgba(230,70,50,.25)','#e0563e',6);
+  for (let k = 0; k < 10; k++){
+    line(795+k*10,556,795+k*10,644,'rgba(120,180,255,.35)',2);
+    line(895+k*10,556,895+k*10,644,'rgba(255,130,100,.35)',2);
+  }
+  for (let k = 0; k < 4; k++){
+    const f = ((T*.7)+k/4)%1;
+    circ(920+k*20+Math.sin(f*6)*4, 548 - f*28, 3+f*3, `rgba(255,255,255,${.35*(1-f)})`);
+  }
+  txt('22°C',1000,672,12,'#9ad0ff','center','800'); txt('88°C',945,672,12,'#ff8f73','center','800'); txt('50°C',784,672,12,'#9ad0ff','center','800');
+
+  // 11 ultrafilter
+  rect(560,560,140,80,'#232d44','#5b6a8c',10);
+  for (let k = 0; k < 9; k++) line(574+k*14,566,574+k*14,634,'rgba(160,200,255,.35)',3);
+  line(740,548,740,568,'#7d8bad',3);
+  rect(731,534,18,16,'#5a6a9a',null,3);
+  drops(740,570,596,2,2,'#a7ffd0',40);
+  for (let k = 0; k < 3; k++) circ(632+k*5,646 + ((T*12+k*7)%20),2.2,'#8d7b58');
+  txt('pores',630,664,10,'#8fa0c0'); txt('enzymes',740,524,10,'#8fa0c0');
+
+  // 12 final QC
+  rect(412,458,120,98,'#1b2438','#5b6a8c',6);
+  const labels = ['Clarity','Flavor','Color','Sugar'], lv = [1,.95,1,.72];
+  labels.forEach((l,k) => {
+    const y = 472 + k*20;
+    txt(l,418,y,9,'#8fa0c0','left');
+    rect(458,y-5,56,9,'#10151f',null,3);
+    rect(458,y-5,56*lv[k]*(.96+.04*Math.sin(T*2+k)),9,'#6be28c',null,3);
+  });
+  line(470,556,470,592,'#7d8bad',3);
+
+  // 13 storage
+  [180,252,324].forEach((tx,k) => {
+    tank(tx,470,62,128,'rgba(242,193,78,.92)',.82 - k*.06,2.2);
+    ctx.fillStyle = '#2b3550'; ctx.beginPath(); ctx.ellipse(tx+31,470,31,12,0,Math.PI,0); ctx.fill();
+  });
+  txt('110,000 L each · no preservatives',175,622,10.5,'#8fa0c0','left');
+}
+
+/* ---------- stations (above pipes, below particles) ---------- */
+function drawFront(){
+  // wash shower
+  for (let i = 0; i < 12; i++){
+    const x = 872 + i*10.5, f = ((T*2.2 + i*.37) % 1);
+    line(x,192+f*54,x,198+f*54,'rgba(140,200,255,.9)',2);
+    circ(x,190,2,'#7d8bad');
+  }
+  // lane A: filler, sealer, glue
+  rect(392,696,16,30,'#5a6a9a',null,3); drops(400,726,737,3,2,'#c98a2b',30);
+  txt('fill',412,768,11,'#8fa0c0');
+  const sy = 702 + (Math.sin(T*3)+1)*8; rect(612,sy,40,22,'#9aa7c2',null,3); txt('seal',632,768,11,'#8fa0c0');
+  rect(735,690,80,12,'#5a6a9a',null,3);
+  for (const gx of [756,792]){
+    rect(gx-5,702,10,20,'#c9d3ea',null,2);
+    const on = Math.sin(T*9 + gx) > -.2;
+    if (on){ ctx.strokeStyle = '#ff9d4a'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(gx,722); ctx.lineTo(gx-3,728); ctx.lineTo(gx+3,733); ctx.lineTo(gx,738); ctx.stroke(); }
+  }
+  txt('glue + straw',775,768,11,'#8fa0c0');
+  txt('100 / min',210,768,11,'#ffd27a','left','700');
+
+  // lane B: sterile room
+  rect(300,822,620,118,'rgba(255,255,255,.04)','rgba(220,235,255,.45)',10,1.5);
+  ctx.setLineDash([6,6]); rect(300,822,620,118,null,'rgba(220,235,255,.25)',10,1); ctx.setLineDash([]);
+  txt('WHITE STERILE ROOM',610,930,10,'rgba(220,235,255,.6)');
+  for (const nx of [340,380,420,460]){ rect(nx-5,826,10,14,'#9aa7c2',null,2); drops(nx,842,854,3,10,'#b48cff',50,1.4); }
+  txt('H₂O₂ wash',400,905,11,'#c9a8ff');
+  for (const nx of [515,545,575]){ rect(nx-5,826,10,14,'#9aa7c2',null,2); drops(nx,842,854,3,10,'#7cc8ff',50,1.4); }
+  txt('sterile rinse',545,905,11,'#9ad0ff');
+  rect(690,822,20,30,'#5a6a9a',null,3); drops(700,852,862,3,2,'#c98a2b',30);
+  txt('fill',700,905,11,'#8fa0c0');
+  const cy = 826 + (Math.sin(T*3+1)+1)*6; rect(796,cy,28,16,'#d63a3a',null,3);
+  txt('cap',810,905,11,'#8fa0c0');
+  txt('120 / min',152,905,11,'#ffd27a','left','700');
+
+  // labeler
+  ctx.save(); ctx.translate(1000,815); ctx.rotate(T*2);
+  circ(0,0,17,'#cdd6ee','#5b6a8c'); line(-17,0,17,0,'#5b6a8c',2); line(0,-17,0,17,'#5b6a8c',2); ctx.restore();
+  rect(990,832,20,8,'#ffffff',null,2); txt('labeler',1000,905,11,'#8fa0c0');
+
+  // truck
+  rect(1400,735,150,130,'#34415e','#5b6a8c',6); rect(1550,775,45,90,'#34415e','#5b6a8c',6);
+  rect(1565,785,24,20,'#9ad0ff',null,3);
+  circ(1440,872,12,'#10151f','#5b6a8c'); circ(1575,872,12,'#10151f','#5b6a8c');
+  txt('SHIPPING',1475,760,13,'#ffd27a','center','800');
+  txt(`boxes   ${cB}`,1475,800,13,'#e8eefc'); txt(`bottles ${cT}`,1475,830,13,'#e8eefc');
+}
+
+/* ---------- particles ---------- */
+function drawParticle(p){
+  const [x,y,g] = posOf(p), s = g.state;
+  if (s === 'apple' || s === 'clean'){
+    ctx.save(); ctx.translate(x,y); ctx.rotate(g.stage <= 1 ? -p.d * .12 : p.d * .06);
+    circ(0,0,9,p.col,'rgba(0,0,0,.35)',1);
+    line(0,-9,2,-14,'#5a3b1e',2);
+    if (s === 'apple'){ circ(-3,2,1.4,'rgba(60,35,15,.7)'); circ(4,-2,1.2,'rgba(60,35,15,.7)'); }
+    else { circ(-3,-3,2.6,'rgba(255,255,255,.7)'); }
+    ctx.restore();
+    return;
+  }
+  if (s === 'mash'){ circ(x,y,7,'#b88a56'); circ(x-2,y-1,2,'#8c6035'); circ(x+3,y+2,1.6,'#d6ae7a'); return; }
+  if (s === 'juice'){ circ(x,y,5.5,'#e0a43a'); return; }
+  if (s === 'clear'){ ctx.shadowColor = '#ffd54a'; ctx.shadowBlur = 8; circ(x,y,5.5,'#ffe27a'); ctx.shadowBlur = 0; return; }
+  if (s === 'ebox' || s === 'box' || s === 'boxs' || s === 'boxst'){
+    rect(x-8,y-13,16,22,s==='ebox'?'rgba(255,255,255,.08)':null,'#e8eefc',3,1.6);
+    if (s !== 'ebox'){ rect(x-6.5,y-3,13,10,'#e0a43a',null,2); }
+    if (s === 'boxs' || s === 'boxst') rect(x-8,y-13,16,4,'#cdd6ee',null,1);
+    if (s === 'boxst'){ line(x+3,y-13,x+7,y-22,'#ffffff',2); line(x+7,y-22,x+10,y-22,'#ff5a5a',2); }
+    return;
+  }
+  // bottles
+  rect(x-6.5,y-7,13,17,s==='bottle'||s==='bottlec'||s==='bottlel'?null:'rgba(255,255,255,.06)',s==='wbottle'?'#9ad0ff':'#cdd6ee',3,1.6);
+  rect(x-3,y-14,6,8,null,s==='wbottle'?'#9ad0ff':'#cdd6ee',1,1.6);
+  if (s === 'bottle' || s === 'bottlec' || s === 'bottlel') rect(x-5,y-5,10,13,'#e0a43a',null,2);
+  if (s === 'bottlec' || s === 'bottlel') rect(x-4,y-17,8,4,'#d63a3a',null,1);
+  if (s === 'bottlel') rect(x-6,y-1,12,7,'#ffffff','#c9d3ea',1,1);
+  if (s === 'wbottle') circ(x-3,y-2,1.6,'#ffffff');
+}
+function drawLeaf(l){
+  ctx.save(); ctx.translate(l.x,l.y); ctx.rotate(l.r + (l.vy ? l.vy*.01 : 0));
+  ctx.fillStyle = '#4fa14a'; ctx.beginPath(); ctx.ellipse(0,0,7,3.5,0,0,6.2832); ctx.fill();
+  line(-7,0,7,0,'#2f6a2d',1); ctx.restore();
+}
+
+/* ---------- caption ---------- */
+const capN = document.getElementById('capN'), capT = document.getElementById('capT'), capD = document.getElementById('capD');
+const dots = document.getElementById('dots');
+STAGES.forEach((s,i) => {
+  const b = document.createElement('button'); b.textContent = (i+1) + ' ' + s[0]; b.title = s[1];
+  b.onclick = () => spawnAtStage(i);
+  dots.appendChild(b);
+});
+function setStage(s){
+  if (s === activeStage) return;
+  activeStage = s;
+  capN.textContent = s + 1; capT.textContent = STAGES[s][0]; capD.textContent = STAGES[s][1];
+  [...dots.children].forEach((b,i) => b.classList.toggle('on', i === s));
+}
+
+/* ---------- main loop ---------- */
+function render(){
+  ctx.clearRect(0,0,W,H);
+  // faint grid
+  ctx.strokeStyle = 'rgba(255,255,255,.025)'; ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  if (tracked){ setStage(posOf(tracked)[2].stage); }
+  drawBack();
+  drawPath(MAIN); drawPath(LA); drawPath(LB);
+  drawFront();
+  leaves.forEach(drawLeaf);
+  parts.forEach(drawParticle);
+  if (tracked){
+    const [x,y] = posOf(tracked);
+    const r = 17 + Math.sin(T*6) * 2;
+    ctx.shadowColor = '#ffb83d'; ctx.shadowBlur = 12;
+    circ(x,y,r,null,'#ffb83d',2.5); ctx.shadowBlur = 0;
+  }
+  document.getElementById('sA').textContent = cA;
+  document.getElementById('sB').textContent = cB;
+  document.getElementById('sT').textContent = cT;
+}
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(.05, (now - last) / 1000); last = now;
+  if (!paused) step(dt * speed, false);
+  render();
+  requestAnimationFrame(frame);
+}
+
+document.getElementById('pp').onclick = e => { paused = !paused; e.target.textContent = paused ? '▶ Play' : '⏸ Pause'; };
+document.getElementById('spd').oninput = e => { speed = +e.target.value; document.getElementById('spv').textContent = speed + '×'; };
+document.getElementById('rst').onclick = () => reset();
+
+reset();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
