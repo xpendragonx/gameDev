@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lemonade Tycoon ASCII</title>
+<style>
+  :root{--bg:#0a0f07;--panel:#141b0d;--line:#2f3d1c;--ink:#f4f2c8;--mute:#9aa57a;--accent:#ffe14d}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'DejaVu Sans Mono',Menlo,Consolas,'Liberation Mono',monospace}
+  header{display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center;justify-content:space-between;padding:12px 16px}
+  h1{margin:0;font-size:17px;letter-spacing:1px;color:var(--accent)}
+  .ctl{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--mute)}
+  button{font:inherit;font-size:13px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:6px 12px;cursor:pointer}
+  button:hover:not(:disabled){border-color:var(--accent)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .wrap{padding:0 16px 24px;max-width:1500px;margin:0 auto}
+  #screen{background:#070b04;border:1px solid var(--line);border-radius:8px;padding:10px;text-align:center;overflow:hidden;box-shadow:inset 0 0 40px rgba(0,0,0,.6)}
+  #scr{display:inline-block;margin:0;text-align:left;line-height:1.18;white-space:pre;font-family:inherit;cursor:crosshair;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+  #msg{margin-top:10px;min-height:22px;color:var(--accent);font-size:14px}
+  #shop{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-top:6px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px}
+  .card h3{margin:0;font-size:14px;color:var(--accent)}
+  .card p{margin:0;font-size:12.5px;color:var(--mute);line-height:1.45}
+  .card .cost{font-size:13px;color:var(--ink)}
+  .card.owned{border-color:#6a8f2a}
+  .card.soon{opacity:.6}
+  small{color:var(--mute)}
+  /* palette */
+  .t{color:#f4f2c8}.d{color:#58642f}.s{color:#9aa57a}.h{color:#ffe14d}.a{color:#ffe84d}.ad{color:#a8942a}
+  .g{color:#7ee05a}.w{color:#58b8ff}.wd{color:#2f6fa0}.j{color:#ffd21f}.y{color:#fff7a0}.m{color:#d9cc5c}
+  .p{color:#c18cff}.r{color:#ff6a4a}.k{color:#e8e8e8}.mold{color:#4fd1a0}.rot{color:#d9782b}.twig{color:#c9a46a}
+</style>
+</head>
+<body>
+<header>
+  <h1>🍋 LEMONADE TYCOON :: STAGE 1</h1>
+  <div class="ctl"><button id="reset">Reset save</button></div>
+</header>
+<div class="wrap">
+  <div id="screen"><pre id="scr"></pre></div>
+  <div id="msg"></div>
+  <h3 style="margin:14px 0 8px;font-size:14px;color:var(--accent)">UPGRADES</h3>
+  <div id="shop"></div>
+  <p><small>Click bad lemons on the belt. Master the skill, then buy the machine that does it for you.</small></p>
+</div>
+
+<script>
+'use strict';
+const W = 100, H = 28;
+const ch = new Array(W * H), co = new Array(W * H);
+const scr = document.getElementById('scr');
+
+/* ---------- ASCII engine ---------- */
+function clear(){ ch.fill(' '); co.fill(''); }
+function put(x, y, s, c = 't'){
+  x = Math.floor(x); y = Math.floor(y);
+  if (y < 0 || y >= H) return;
+  for (let i = 0; i < s.length; i++){
+    const xx = x + i;
+    if (xx < 0 || xx >= W || s[i] === ' ') continue;
+    ch[y * W + xx] = s[i]; co[y * W + xx] = c;
+  }
+}
+function box(x, y, w, h, c = 's', dbl = false){
+  const [tl,tr,bl,br,hz,vt] = dbl ? '╔╗╚╝═║' : '┌┐└┘─│';
+  put(x, y, tl + hz.repeat(Math.max(0, w - 2)) + tr, c); put(x, y + h - 1, bl + hz.repeat(Math.max(0, w - 2)) + br, c);
+  for (let j = 1; j < h - 1; j++){ put(x, y + j, vt, c); put(x + w - 1, y + j, vt, c); }
+}
+function belt(x1, x2, y, T, c = 's'){
+  const sh = Math.floor(T * 6 * (beltSpeed() / 5));
+  for (let x = x1; x <= x2; x++){
+    const m = (((x - sh) % 4) + 4) % 4;
+    put(x, y, m === 0 ? '›' : '═', c);
+    if (m === 2) put(x, y + 1, '·', 'd');
+  }
+  put(x1 - 1, y, '(', c); put(x2 + 1, y, ')', c);
+}
+function man(x, y, c = 'k'){ put(x, y, ' O ', c); put(x, y + 1, '/|\\', c); put(x, y + 2, '/ \\', c); }
+function blink(T, r = 3){ return Math.floor(T * r) % 2 === 0; }
+const esc = c => c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '&' ? '&amp;' : c;
+function render(){
+  const out = [];
+  for (let y = 0; y < H; y++){
+    let line = '', cur = null, buf = '';
+    for (let x = 0; x < W; x++){
+      const c = co[y * W + x] || 't';
+      if (c !== cur){ if (buf) line += `<span class="${cur}">${buf}</span>`; cur = c; buf = ''; }
+      buf += esc(ch[y * W + x]);
+    }
+    line += `<span class="${cur}">${buf}</span>`;
+    out.push(line);
+  }
+  scr.innerHTML = out.join('\n');
+}
+function fit(){
+  const wpx = document.getElementById('screen').clientWidth - 20;
+  scr.style.fontSize = Math.max(6, Math.min(24, wpx / (W * 0.602))) + 'px';
+}
+window.addEventListener('resize', fit);
+
+/* ---------- game state ---------- */
+const KEY = 'lemonTycoon.v1';
+const FRESH = { coins: 0, sorted: 0, caught: 0, missed: 0, wrong: 0, mastery: 0, mastered: false, auto: false, belt: 0, opt: 0, best: 0, t: Date.now() };
+let G = Object.assign({}, FRESH);
+try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s) G = Object.assign({}, FRESH, s); } catch (e) {}
+function save(){ G.t = Date.now(); try { localStorage.setItem(KEY, JSON.stringify(G)); } catch (e) {} }
+
+const MAXBELT = 5, MAXOPT = 6, AUTO_COST = 40;
+const beltCost = () => Math.floor(25 * Math.pow(1.7, G.belt));
+const optCost = () => Math.floor(50 * Math.pow(1.7, G.opt));
+const beltSpeed = () => 5 * (1 + .2 * G.belt);
+const spawnEvery = () => 1.0 / (1 + .2 * G.belt);
+const accuracy = () => Math.min(.99, .85 + .03 * G.opt);
+const mult = () => G.mastered ? 1.5 : 1;
+const X0 = 18, X1 = 82, Y = 12, SCAN = 56;
+const BAD = [['mold', '@'], ['rot', '%'], ['leaf', '&'], ['twig', '#']];
+
+let T = 0, lemons = [], pops = [], spawnT = 0, combo = 0, zap = 0, msgT = 0, id = 0;
+
+function spawn(x = X0){
+  const bad = Math.random() < .4, k = BAD[(Math.random() * BAD.length) | 0];
+  lemons.push({ id: id++, x, bad, kind: bad ? k[0] : 'good', glyph: bad ? k[1] : 'O' });
+}
+function pop(x, y, text, col){ pops.push({ x, y, text, col, t: 0 }); }
+function say(s){ document.getElementById('msg').textContent = s; msgT = 7; }
+
+function exitLemon(l){
+  if (!l.bad){ G.coins += mult(); G.sorted++; return; }
+  G.missed++; combo = 0; G.coins = Math.max(0, G.coins - 2);
+  if (!G.mastered) G.mastery = Math.max(0, G.mastery - 3);
+  pop(X1 - 2, Y - 1, '-2', 'r');
+}
+function clickAt(cx, cy){
+  let best = null, bd = 1e9;
+  for (const l of lemons){
+    const dx = Math.abs(l.x - cx), dy = Math.abs(Y - cy);
+    if (dx <= 2.3 && dy <= 2.6 && dx + dy < bd){ bd = dx + dy; best = l; }
+  }
+  if (!best) return;
+  if (best.bad){
+    best.dead = true; combo++; G.caught++; G.best = Math.max(G.best, combo);
+    const gain = Math.round((3 + Math.floor(combo / 5)) * mult());
+    G.coins += gain; pop(best.x, Y - 1, '+' + gain, 'y');
+    if (!G.mastered){
+      G.mastery = Math.min(100, G.mastery + 7);
+      if (G.mastery >= 100){ G.mastered = true; say('★ MASTERY! Your eye is sharp — the Auto-Inspector is now available (and manual clicks pay ×1.5).'); }
+    }
+  } else {
+    G.wrong++; combo = 0; G.coins = Math.max(0, G.coins - 1);
+    if (!G.mastered) G.mastery = Math.max(0, G.mastery - 10);
+    pop(best.x, Y - 1, '-1 oops', 'r');
+  }
+}
+function step(dt){
+  T += dt;
+  spawnT -= dt;
+  if (spawnT <= 0){ spawn(); spawnT = spawnEvery() * (.85 + Math.random() * .3); }
+  const sp = beltSpeed();
+  for (const l of lemons){
+    l.x += sp * dt;
+    if (G.auto && !l.scanned && l.x >= SCAN){
+      l.scanned = true; zap = .3;
+      if (l.bad && Math.random() < accuracy()){ l.dead = true; G.caught++; const g = Math.round(2 * mult()); G.coins += g; pop(l.x, Y - 1, '+' + g, 'y'); }
+    }
+    if (!l.dead && l.x > X1){ l.dead = true; exitLemon(l); }
+  }
+  lemons = lemons.filter(l => !l.dead);
+  pops = pops.filter(p => (p.t += dt) < 1);
+  zap = Math.max(0, zap - dt);
+  if (msgT > 0 && (msgT -= dt) <= 0) document.getElementById('msg').textContent = '';
+}
+
+/* ---------- scene ---------- */
+const STRIP = ['INSPECT', 'GRIND', 'MACERATE', 'PRESS', 'PASTEUR', 'FINAL QC'];
+function draw(){
+  clear();
+  box(0, 0, W, H, 'd');
+  put(2, 0, ` 1/6 · INSPECTION ${G.auto ? '· AUTO' : '· MANUAL'} `, 'h');
+
+  // stats
+  put(3, 2, 'COINS', 'd'); put(9, 2, String(Math.floor(G.coins)).padEnd(7), 'h');
+  put(19, 2, 'SORTED', 'd'); put(26, 2, String(G.sorted).padEnd(6), 't');
+  put(34, 2, 'COMBO', 'd'); put(40, 2, String(combo).padEnd(4), combo >= 5 ? 'h' : 't'); put(45, 2, `(best ${G.best})`, 'd');
+  put(60, 2, 'BELT', 'd'); put(65, 2, `${beltSpeed().toFixed(1)} c/s`, 't');
+  put(76, 2, 'ACCURACY', 'd'); put(85, 2, G.auto ? Math.round(accuracy() * 100) + '%' : '--', 't');
+  const lps = 1 / spawnEvery();
+  if (G.auto){ const est = lps * (0.6 * mult() + 0.4 * accuracy() * 2 * mult() - 0.4 * (1 - accuracy()) * 2); put(3, 3, `income ≈ ${est.toFixed(1)} coins/s`, 'g'); }
+
+  // truck, belt, trash
+  put(2, 8, ' ┌────────────┐', 's'); put(2, 9, ' │ OOOOOOOOOO │┐', 'a'); put(2, 10, ' │ OOOoOOOOOo ││', 'a'); put(2, 11, ' │OOOOOOOOOOOO│┘', 'a');
+  put(2, 12, ' └─(O)────(O)─┘', 's'); put(3, 13, 'TRUCK', 'd');
+  belt(X0 - 1, X1 + 1, 13, T);
+  box(84, 14, 12, 5, 's'); put(86, 16, 'TRASH', 'd');
+
+  // inspector
+  man(30, 5, 'k'); put(26, 4, 'INSPECTOR', 'h');
+  if (!G.auto && blink(T, 3)) { put(27, 8, '\\ · · /', 'y'); }
+
+  // auto-inspector machine
+  if (G.auto){
+    box(SCAN - 8, 3, 17, 6, 'h', true); put(SCAN - 6, 4, 'AUTO-INSPECT', 'h');
+    put(SCAN - 4, 5, blink(T, 4) ? '[ ▓▒░ ]' : '[ ░▒▓ ]', 'g'); put(SCAN - 6, 7, 'optics Lv ' + G.opt, 'd');
+    put(SCAN, 9, '║', 's'); put(SCAN, 10, '║', 's');
+    if (zap > 0){ put(SCAN - 2, 11, '\\ | /', 'y'); put(SCAN - 2, 12, ' ─┼─ ', 'y'); }
+    else put(SCAN, 11, '▼', 'y');
+  }
+
+  // lemons
+  for (const l of lemons){
+    if (l.bad) put(l.x, Y, l.glyph, l.kind);
+    else put(l.x, Y, 'Oo0o'[(Math.floor(T * 4) + l.id) % 4], 'a');
+  }
+  for (const p of pops) put(p.x - 1, Y - 1 - p.t * 2.5, p.text, p.col);
+
+  // legend
+  put(3, 16, 'BAD:', 'd'); put(8, 16, '@ mold', 'mold'); put(16, 16, '% rot', 'rot'); put(23, 16, '& leaf', 'g'); put(31, 16, '# twig', 'twig');
+  put(41, 16, 'GOOD:', 'd'); put(47, 16, 'O', 'a');
+
+  // mastery
+  const m = Math.floor(G.mastery / 100 * 30);
+  put(3, 18, 'MASTERY', 'd');
+  put(11, 18, '[' + '█'.repeat(m) + '░'.repeat(30 - m) + ']', G.mastered ? 'h' : 'g');
+  put(44, 18, G.mastered ? '★ MASTERED' : Math.floor(G.mastery) + '%', G.mastered ? 'h' : 't');
+  if (!G.mastered) { if (blink(T, 2)) put(3, 20, '>>> CLICK THE BAD LEMONS BEFORE THEY REACH THE END <<<', 'h'); }
+  else if (!G.auto) put(3, 20, 'Auto-Inspector unlocked: buy it below!', 'g');
+  else put(3, 20, 'Line running. Upgrade belt and optics for more coins.', 'g');
+
+  // stage strip
+  STRIP.forEach((n, i) => {
+    const x = 3 + i * 16, done = i === 0 && G.auto;
+    put(x, 23, `[${i + 1}] ${n}`, i === 0 ? (done ? 'g' : 'h') : 'd');
+    put(x, 24, i === 0 ? (done ? 'AUTOMATED ✓' : 'ACTIVE') : '(locked)', i === 0 ? (done ? 'g' : 'h') : 'd');
+    if (i < 5) put(x + 13, 23, '►', 'd');
+  });
+  put(3, 26, 'Next stage: Grinder — coming soon', 'd');
+}
+
+/* ---------- shop ---------- */
+const shop = document.getElementById('shop');
+let shopKey = '';
+function renderShop(){
+  const cards = [];
+  cards.push({ id: 'auto', title: '🤖 Auto-Inspector', desc: 'A machine that scans the belt and pulls bad lemons for you. Passive income.',
+    cost: AUTO_COST, owned: G.auto, lock: !G.mastered ? 'Reach 100% mastery first' : '' });
+  cards.push({ id: 'belt', title: `⚙ Faster belt  (Lv ${G.belt}/${MAXBELT})`, desc: 'More lemons per second. More skill needed manually, more coins automatically.',
+    cost: beltCost(), owned: G.belt >= MAXBELT, maxed: true });
+  cards.push({ id: 'opt', title: `🔍 Sharper optics  (Lv ${G.opt}/${MAXOPT})`, desc: 'Auto-Inspector accuracy +3% per level (currently ' + Math.round(accuracy() * 100) + '%).',
+    cost: optCost(), owned: G.opt >= MAXOPT, maxed: true, lock: !G.auto ? 'Needs the Auto-Inspector' : '' });
+  cards.push({ id: 'next', title: '🔒 Stage 2: Grinder', desc: 'The next manual job: crank in rhythm and dose the enzymes. Not built yet.', soon: true });
+  const key = JSON.stringify([cards.map(c => [c.id, c.cost, c.owned, c.lock]), Math.floor(G.coins)]);
+  if (key === shopKey) return; shopKey = key;
+  shop.innerHTML = '';
+  cards.forEach(c => {
+    const d = document.createElement('div'); d.className = 'card' + (c.owned ? ' owned' : '') + (c.soon ? ' soon' : '');
+    const afford = G.coins >= (c.cost || 0);
+    d.innerHTML = `<h3>${c.title}</h3><p>${c.desc}</p>`;
+    if (c.soon){ shop.appendChild(d); return; }
+    const b = document.createElement('button');
+    if (c.owned){ b.textContent = c.maxed ? 'MAX' : 'OWNED ✓'; b.disabled = true; }
+    else if (c.lock){ b.textContent = c.lock; b.disabled = true; }
+    else { b.textContent = `Buy · ${c.cost} 🪙`; b.disabled = !afford; b.onclick = () => buy(c.id); }
+    d.appendChild(b); shop.appendChild(d);
+  });
+}
+function buy(k){
+  if (k === 'auto' && G.mastered && !G.auto && G.coins >= AUTO_COST){ G.coins -= AUTO_COST; G.auto = true; say('🤖 Auto-Inspector online! Lemons are now sorted for you. Stage 2 (Grinder) comes next.'); }
+  else if (k === 'belt' && G.belt < MAXBELT && G.coins >= beltCost()){ G.coins -= beltCost(); G.belt++; say('⚙ Belt upgraded to Lv ' + G.belt); }
+  else if (k === 'opt' && G.auto && G.opt < MAXOPT && G.coins >= optCost()){ G.coins -= optCost(); G.opt++; say('🔍 Optics upgraded to Lv ' + G.opt); }
+  shopKey = ''; renderShop(); save();
+}
+
+/* ---------- input ---------- */
+scr.addEventListener('pointerdown', e => {
+  const r = scr.getBoundingClientRect();
+  clickAt((e.clientX - r.left) / (r.width / W), (e.clientY - r.top) / (r.height / H));
+});
+document.getElementById('reset').onclick = () => {
+  if (!confirm('Reset all progress?')) return;
+  G = Object.assign({}, FRESH, { t: Date.now() }); lemons = []; pops = []; combo = 0; initBelt(); shopKey = ''; renderShop(); save(); say('Save reset.');
+};
+
+/* ---------- boot ---------- */
+function initBelt(){ lemons = []; for (let x = X0 + 4; x < X1 - 4; x += 9) spawn(x); }
+initBelt();
+if (G.auto){
+  const secs = Math.min(3600, (Date.now() - G.t) / 1000);
+  const lps = 1 / spawnEvery(), est = lps * (0.6 * mult() + 0.4 * accuracy() * 2 * mult());
+  const away = Math.floor(secs * est * .5);
+  if (secs > 30 && away > 0){ G.coins += away; say(`Welcome back! Your factory earned ${away} 🪙 while you were away.`); }
+}
+fit(); renderShop();
+let last = performance.now(), acc = 0, saveT = 0;
+function frame(now){
+  const dt = Math.min(.1, (now - last) / 1000); last = now;
+  step(dt); acc += dt; saveT += dt;
+  if (acc >= 1 / 20){ acc = 0; draw(); render(); renderShop(); }
+  if (saveT > 5){ saveT = 0; save(); }
+  requestAnimationFrame(frame);
+}
+window.addEventListener('beforeunload', save);
+window.__G = () => ({ G, lemons, clickAt, buy, get combo(){ return combo; } });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
