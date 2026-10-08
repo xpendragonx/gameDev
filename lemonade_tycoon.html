@@ -17,18 +17,18 @@
   .wrap{padding:0 16px 24px;max-width:1500px;margin:0 auto}
   #tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
   #tabs button.on{background:var(--accent);color:#1a1200;border-color:var(--accent);font-weight:700}
+  #tabs button.new{border-color:var(--accent);color:var(--accent)}
   #screen{background:#070b04;border:1px solid var(--line);border-radius:8px;padding:10px;text-align:center;overflow:hidden;box-shadow:inset 0 0 40px rgba(0,0,0,.6)}
   #scr{display:inline-block;margin:0;text-align:left;line-height:1.18;white-space:pre;font-family:inherit;cursor:crosshair;user-select:none;-webkit-user-select:none;touch-action:manipulation}
   #msg{margin-top:10px;min-height:22px;color:var(--accent);font-size:14px}
   h3.sec{margin:14px 0 8px;font-size:14px;color:var(--accent)}
-  #shop{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-top:6px}
+  #shop{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:10px;margin-top:6px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px}
   .card h3{margin:0;font-size:14px;color:var(--accent)}
   .card p{margin:0;font-size:12.5px;color:var(--mute);line-height:1.45}
   .card .now{font-size:12px;color:#c8e08a}
   .card.owned{border-color:#6a8f2a}
-  .card.unlock{border-color:var(--accent);background:#1c2410}
-  .card.soon{opacity:.6}
+  .card.bottleneck{border-color:#ff6a4a}
   small{color:var(--mute)}
   /* palette */
   .t{color:#f4f2c8}.d{color:#58642f}.s{color:#9aa57a}.h{color:#ffe14d}.a{color:#ffe84d}.ad{color:#a8942a}
@@ -47,7 +47,7 @@
   <div id="msg"></div>
   <h3 class="sec" id="shopT">UPGRADES</h3>
   <div id="shop"></div>
-  <p><small>Do the job by hand until you master it, then buy the machine that does it for you. Automated stages keep earning even when you look at another stage.</small></p>
+  <p><small>Learn each job by hand. Mastery lets you buy its machine (Lv 1), which also unlocks the next job. Higher levels make that stage faster, but the whole line only runs as fast as its slowest stage: check the Overview tab for bottlenecks.</small></p>
 </div>
 
 <script>
@@ -57,57 +57,43 @@ const ch = new Array(W * H), co = new Array(W * H);
 const scr = document.getElementById('scr');
 
 /* ======================================================================
-   CONFIG  —  edit this section to rebalance or add/remove levels
+   CONFIG  —  the whole factory is described here
    ----------------------------------------------------------------------
+   Each process (stage) has exactly ONE upgrade with several levels:
+     level 0   = manual (you play the minigame)
+     level 1   = automation (needs mastery) -> also unlocks the next stage
+     level 2+  = faster machine (rate = units processed per second)
    lv(n, firstCost, growth, fx)
      n          number of levels (change it to add or remove levels)
      firstCost  cost of level 1
      growth     each level costs growth× the previous (rounded)
-     fx(i)      effect values for level i (1..n), returned as an object
-   You can also write a levels array by hand: [{cost:40, acc:.9}, ...]
-   Each upgrade:  base = effect values at level 0.
-     needs: 'mastery' -> the stage's mastery bar must be full
-            '<id>'    -> that upgrade must be owned
+     fx(i)      effect for level i, returned as an object: { rate: ... }
+   You can also hand-write levels: [{cost:30, rate:1}, {cost:50, rate:1.4}]
+   value = coins this stage adds to every unit. A unit leaving the last
+           automated stage is sold for the sum of all values up to there.
+
+   TO ADD A STAGE:  1) push an entry onto STAGES (order = line order)
+                    2) add a module {step, draw, click} to MODS below
+                    3) remove its name from PLANNED
    ====================================================================== */
 const lv = (n, c0, g, fx) => Array.from({ length: n }, (_, i) => Object.assign({ cost: Math.round(c0 * Math.pow(g, i)) }, fx(i + 1)));
 
 const STAGES = [
-  { id: 'inspect', name: 'INSPECT', title: 'Inspection', unlock: null, automate: 'auto' },
-  { id: 'grind',   name: 'GRIND',   title: 'Grinder',    unlock: { cost: 50, needs: 'auto' }, automate: 'g_motor' },
+  { id: 'inspect', name: 'INSPECT', title: 'Inspection', value: 1.0,
+    upgrade: { title: '🤖 Auto-Inspector', levels: lv(6, 30, 1.7, n => ({ rate: 1.0 * Math.pow(1.35, n - 1) })) } },
+  { id: 'grind', name: 'GRIND', title: 'Grinder', value: 1.5,
+    upgrade: { title: '⚡ Auto-Grinder', levels: lv(6, 80, 1.75, n => ({ rate: 0.8 * Math.pow(1.35, n - 1) })) } },
+  { id: 'macerate', name: 'MACERATE', title: 'Maceration', value: 1.0,
+    upgrade: { title: '🛢 Extra Tanks', levels: lv(6, 150, 1.8, n => ({ rate: 0.9 * Math.pow(1.35, n - 1) })) } },
+  { id: 'press', name: 'PRESS', title: 'Press', value: 2.5,
+    upgrade: { title: '🗜 Hydraulic Press', levels: lv(6, 250, 1.8, n => ({ rate: 0.8 * Math.pow(1.35, n - 1) })) } },
+  { id: 'pasteur', name: 'PASTEUR', title: 'Pasteurizer', value: 2.0,
+    upgrade: { title: '♨ Heat Exchanger', levels: lv(6, 400, 1.8, n => ({ rate: 0.85 * Math.pow(1.35, n - 1) })) } },
+  { id: 'qc', name: 'FINAL QC', title: 'Final QC', value: 3.0,
+    upgrade: { title: '🔬 Auto-QC Lab', levels: lv(6, 600, 1.8, n => ({ rate: 0.8 * Math.pow(1.35, n - 1) })) } },
 ];
-const COMING = ['MACERATE', 'PRESS', 'PASTEUR', 'FINAL QC'];    // locked placeholders, not built yet
-
-const UPGRADES = [
-  // ---- stage 1: inspection ----
-  { id: 'auto', stage: 'inspect', title: '🤖 Auto-Inspector', needs: 'mastery', base: {},
-    desc: 'A machine that scans the belt and pulls bad lemons for you. Passive income.',
-    levels: [{ cost: 40 }] },
-  { id: 'belt', stage: 'inspect', title: '⚙ Faster belt', base: { speed: 5, every: 1 },
-    desc: 'More lemons per second: more skill needed by hand, more coins when automated.',
-    show: o => `${o.speed.toFixed(1)} cells/s`,
-    levels: lv(5, 25, 1.7, n => ({ speed: 5 * (1 + .2 * n), every: 1 / (1 + .2 * n) })) },
-  { id: 'optics', stage: 'inspect', title: '🔍 Sharper optics', needs: 'auto', base: { acc: .85 },
-    desc: 'Auto-Inspector catches more bad lemons.',
-    show: o => `${Math.round(o.acc * 100)}% accuracy`,
-    levels: lv(6, 50, 1.7, n => ({ acc: Math.min(.99, .85 + .03 * n) })) },
-
-  // ---- stage 2: grinder ----
-  { id: 'g_crank', stage: 'grind', title: '🛠 Smoother crank', base: { zone: 4 },
-    desc: 'Widens the sweet spot on the rhythm bar. Great while you are learning.',
-    show: o => `sweet spot ±${o.zone}`,
-    levels: lv(3, 30, 1.8, n => ({ zone: 4 + n })) },
-  { id: 'g_motor', stage: 'grind', title: '⚡ Auto-Grinder motor', needs: 'mastery', base: {},
-    desc: 'A motor cranks the grinder for you. Passive income.',
-    levels: [{ cost: 100 }] },
-  { id: 'g_rpm', stage: 'grind', title: '🔧 Motor speed', needs: 'g_motor', base: { rate: .8 },
-    desc: 'More cranks per second.',
-    show: o => `${o.rate.toFixed(2)} cranks/s`,
-    levels: lv(5, 70, 1.65, n => ({ rate: .8 * (1 + .25 * n) })) },
-  { id: 'g_doser', stage: 'grind', title: '🧪 Auto-doser', needs: 'g_motor', base: { boost: 1 },
-    desc: 'Enzymes always flowing: permanent bonus on every crank, by hand or motor.',
-    show: o => `×${o.boost.toFixed(2)} output`,
-    levels: lv(3, 120, 2, n => ({ boost: 1 + .25 * n })) },
-];
+const PLANNED = [];      // names of stages not built yet (shown locked); empty = the whole line exists
+const QUEUE_CAP = 20;                                                // units a stage can buffer before blocking the one behind it
 
 /* ---------- ASCII engine ---------- */
 function clear(){ ch.fill(' '); co.fill(''); }
@@ -157,59 +143,87 @@ function fit(){
 }
 window.addEventListener('resize', fit);
 
-/* ---------- state + generic helpers ---------- */
-const KEY = 'lemonTycoon.v2';
-const freshState = () => ({
-  coins: 0, up: {}, unlocked: { inspect: true }, m: { inspect: { p: 0, done: false }, grind: { p: 0, done: false } },
-  sorted: 0, best: 0, grinds: 0, gbest: 0, t: Date.now()
-});
+/* ======================================================================
+   GLOBAL GAME MODEL  (shared by every stage)
+   ====================================================================== */
+const KEY = 'lemonTycoon.v3';
+const freshState = () => ({ coins: 0, lvl: {}, unlocked: { inspect: true }, seen: { inspect: true }, m: {}, sorted: 0, best: 0, grinds: 0, gbest: 0, t: Date.now() });
 let G = freshState();
 try {
   let s = JSON.parse(localStorage.getItem(KEY) || 'null');
-  if (!s){   // migrate a v1 save
-    const o = JSON.parse(localStorage.getItem('lemonTycoon.v1') || 'null');
-    if (o){ s = freshState(); s.coins = o.coins || 0; s.sorted = o.sorted || 0; s.best = o.best || 0;
-      s.m.inspect = { p: o.mastery || 0, done: !!o.mastered }; s.up = { auto: o.auto ? 1 : 0, belt: o.belt || 0, optics: o.opt || 0 }; }
+  if (!s){   // migrate a v2 save (several upgrades per stage) to one-upgrade-per-stage
+    const o = JSON.parse(localStorage.getItem('lemonTycoon.v2') || 'null');
+    if (o){ s = freshState(); s.coins = o.coins || 0; s.sorted = o.sorted || 0; s.best = o.best || 0; s.grinds = o.grinds || 0; s.gbest = o.gbest || 0;
+      s.m = o.m || {}; s.unlocked = Object.assign({ inspect: true }, o.unlocked); s.seen = Object.assign({}, s.unlocked);
+      s.lvl = { inspect: (o.up && o.up.auto) ? 1 : 0, grind: (o.up && o.up.g_motor) ? 1 : 0 }; }
   }
-  if (s) { const f = freshState(); G = Object.assign(f, s); G.m = Object.assign(f.m, s.m); G.up = s.up || {}; G.unlocked = Object.assign({ inspect: true }, s.unlocked); }
+  if (s){ const f = freshState(); G = Object.assign(f, s); G.lvl = s.lvl || {}; G.m = s.m || {}; G.unlocked = Object.assign({ inspect: true }, s.unlocked); G.seen = Object.assign({ inspect: true }, s.seen); }
 } catch (e) {}
+G.n = G.n || {};
 function save(){ G.t = Date.now(); try { localStorage.setItem(KEY, JSON.stringify(G)); } catch (e) {} }
 
-const defOf = id => UPGRADES.find(u => u.id === id);
-const up = id => G.up[id] || 0;
-const fx = (id, k) => { const d = defOf(id), l = up(id); return l > 0 ? d.levels[l - 1][k] : d.base[k]; };
-const mastered = s => G.m[s].done;
-const mult = s => mastered(s) ? 1.5 : 1;
-function needsMet(needs){ return !needs ? true : needs === 'mastery' ? null : up(needs) > 0; }
-function lockReason(d){
-  if (!d.needs) return '';
-  if (d.needs === 'mastery') return mastered(d.stage) ? '' : 'Reach 100% mastery first';
-  return up(d.needs) > 0 ? '' : 'Needs ' + defOf(d.needs).title.replace(/^\S+\s/, '');
-}
-let T = 0, view = 'inspect', pops = [], msgT = 0;
+const stageOf = id => STAGES.find(s => s.id === id);
+const stageIdx = id => STAGES.findIndex(s => s.id === id);
+const lvl = id => G.lvl[id] || 0;
+const maxLvl = id => stageOf(id).upgrade.levels.length;
+const rateOf = id => lvl(id) > 0 ? stageOf(id).upgrade.levels[lvl(id) - 1].rate : 0;
+const automated = id => lvl(id) > 0;
+const mastery = id => G.m[id] || (G.m[id] = { p: 0, done: false });
+const mastered = id => mastery(id).done;
+const mult = id => mastered(id) ? 1.5 : 1;                       // manual-play bonus once mastered
+const cumValue = i => STAGES.slice(0, i + 1).reduce((a, s) => a + s.value, 0);
+const plainName = t => t.replace(/^\S+\s/, '');
+let T = 0, view = 'overview', pops = [], msgT = 0;
 function pop(x, y, text, col){ pops.push({ x, y, text, col, t: 0 }); }
 function say(s){ document.getElementById('msg').textContent = s; msgT = 7; }
-function addMastery(stage, amt){
-  const m = G.m[stage]; if (m.done) return;
+function addMastery(id, amt){
+  const m = mastery(id); if (m.done) return;
   m.p = Math.max(0, Math.min(100, m.p + amt));
-  if (m.p >= 100){ m.done = true; const d = UPGRADES.find(u => u.stage === stage && u.needs === 'mastery');
-    say(`★ MASTERY! ${d ? d.title.replace(/^\S+\s/, '') + ' is now available, and ' : ''}manual play pays ×1.5.`); }
+  if (m.p >= 100){ m.done = true; say(`★ MASTERY! You can now buy the ${plainName(stageOf(id).upgrade.title)} (Lv 1) — it automates this stage and unlocks the next one.`); }
 }
-function drawMastery(stage, y){
-  const m = G.m[stage], n = Math.floor(m.p / 100 * 30);
+function drawMastery(id, y){
+  const m = mastery(id), n = Math.floor(m.p / 100 * 30);
   put(3, y, 'MASTERY', 'd');
   put(11, y, '[' + '█'.repeat(n) + '░'.repeat(30 - n) + ']', m.done ? 'h' : 'g');
   put(44, y, m.done ? '★ MASTERED' : Math.floor(m.p) + '%', m.done ? 'h' : 't');
 }
 
+/* ---------- production-line simulation ----------
+   Automated stages form a chain starting at stage 1. Each stage pulls units
+   from the queue in front of it, processes at its rate, and pushes to the next
+   queue (blocked if that queue is full). Units leaving the end of the chain
+   are sold for the cumulative value of every stage they passed through.      */
+const SIM = { buf: {}, util: {}, state: {}, income: 0 };
+function chain(){ const c = []; for (const s of STAGES){ if (!G.unlocked[s.id] || !automated(s.id)) break; c.push(s); } return c; }
+function lineStats(){
+  const c = chain(); if (!c.length) return { chain: c, rate: 0, income: 0, bott: -1 };
+  let bott = 0; c.forEach((s, i) => { if (rateOf(s.id) < rateOf(c[bott].id)) bott = i; });
+  const rate = rateOf(c[bott].id);
+  return { chain: c, rate, income: rate * cumValue(c.length - 1), bott };
+}
+function simStep(dt){
+  const c = chain(); let sold = 0;
+  STAGES.forEach(s => { if (!c.includes(s)){ SIM.buf[s.id] = 0; SIM.state[s.id] = automated(s.id) ? 'idle' : 'manual'; SIM.util[s.id] = 0; } });
+  c.forEach((s, i) => {
+    const want = rateOf(s.id) * dt, nxt = c[i + 1];
+    const avail = i === 0 ? want : Math.min(want, SIM.buf[s.id] || 0);
+    const room = nxt ? Math.max(0, QUEUE_CAP - (SIM.buf[nxt.id] || 0)) : Infinity;
+    const done = Math.max(0, Math.min(want, avail, room));
+    if (i > 0) SIM.buf[s.id] -= done; else SIM.buf[s.id] = 0;
+    if (nxt) SIM.buf[nxt.id] = (SIM.buf[nxt.id] || 0) + done;
+    else { const v = done * cumValue(i); G.coins += v; sold += v; }
+    SIM.util[s.id] = (SIM.util[s.id] || 0) + ((want > 0 ? done / want : 0) - (SIM.util[s.id] || 0)) * Math.min(1, dt * 2);
+    SIM.state[s.id] = avail < want * .97 ? 'starved' : room < want * .97 ? 'blocked' : 'running';
+  });
+  SIM.income += (sold / dt - SIM.income) * Math.min(1, dt * 1.5);
+}
+
 /* ======================================================================
-   STAGE 1 — INSPECTION
+   STAGE 1 — INSPECTION  (click the bad lemons)
    ====================================================================== */
 const X0 = 18, X1 = 82, Y = 12, SCAN = 56;
 const BAD = [['mold', '@'], ['rot', '%'], ['leaf', '&'], ['twig', '#']];
 const I = { lemons: [], spawnT: 0, combo: 0, zap: 0, id: 0 };
-const inspSpeed = () => fx('belt', 'speed'), inspEvery = () => fx('belt', 'every'), inspAcc = () => fx('optics', 'acc');
-function inspRate(){ const m = mult('inspect'), a = inspAcc(), lps = 1 / inspEvery(); return lps * (0.6 * m + 0.4 * a * 2 * m - 0.4 * (1 - a) * 2); }
 function inspSpawn(x = X0){
   const bad = Math.random() < .4, k = BAD[(Math.random() * BAD.length) | 0];
   I.lemons.push({ id: I.id++, x, bad, kind: bad ? k[0] : 'good', glyph: bad ? k[1] : 'O' });
@@ -222,6 +236,7 @@ function inspExit(l){
   pop(X1 - 2, Y - 1, '-2', 'r');
 }
 function inspClick(cx, cy){
+  if (automated('inspect')) return;                       // the machine does the job now
   let best = null, bd = 1e9;
   for (const l of I.lemons){
     const dx = Math.abs(l.x - cx), dy = Math.abs(Y - cy);
@@ -237,42 +252,31 @@ function inspClick(cx, cy){
     pop(best.x, Y - 1, '-1 oops', 'r');
   }
 }
-function inspStep(dt, viewed){
-  const auto = up('auto') > 0;
-  if (!viewed && !auto) return;                  // an un-automated stage pauses while you are away
+function inspStep(dt){                                   // visuals + manual mechanic; only runs while viewed
+  const auto = automated('inspect');
   I.spawnT -= dt;
-  if (I.spawnT <= 0){ inspSpawn(); I.spawnT = inspEvery() * (.85 + Math.random() * .3); }
-  const sp = inspSpeed();
+  if (I.spawnT <= 0){ inspSpawn(); I.spawnT = (auto ? Math.max(.35, 1 / rateOf('inspect')) : 1.0) * (.85 + Math.random() * .3); }
   for (const l of I.lemons){
-    l.x += sp * dt;
-    if (auto && !l.scanned && l.x >= SCAN){
-      l.scanned = true; I.zap = .3;
-      if (l.bad && Math.random() < inspAcc()){ l.dead = true; const g = Math.round(2 * mult('inspect')); G.coins += g; pop(l.x, Y - 1, '+' + g, 'y'); }
-    }
-    if (!l.dead && l.x > X1){ l.dead = true; inspExit(l); }
+    l.x += 5 * dt;
+    if (auto && !l.scanned && l.x >= SCAN){ l.scanned = true; I.zap = .3; if (l.bad) l.dead = true; }
+    if (!l.dead && l.x > X1){ l.dead = true; if (!auto) inspExit(l); }
   }
   I.lemons = I.lemons.filter(l => !l.dead);
   I.zap = Math.max(0, I.zap - dt);
 }
 function inspDraw(){
-  const auto = up('auto') > 0;
-  put(3, 2, 'COINS', 'd'); put(9, 2, String(Math.floor(G.coins)).padEnd(7), 'h');
+  const auto = automated('inspect');
   put(19, 2, 'SORTED', 'd'); put(26, 2, String(G.sorted).padEnd(6), 't');
   put(34, 2, 'COMBO', 'd'); put(40, 2, String(I.combo).padEnd(4), I.combo >= 5 ? 'h' : 't'); put(45, 2, `(best ${G.best})`, 'd');
-  put(60, 2, 'BELT', 'd'); put(65, 2, `${inspSpeed().toFixed(1)} c/s`, 't');
-  put(76, 2, 'ACCURACY', 'd'); put(85, 2, auto ? Math.round(inspAcc() * 100) + '%' : '--', 't');
-  if (auto) put(3, 3, `income ≈ ${inspRate().toFixed(1)} coins/s`, 'g');
-
   put(2, 8, ' ┌────────────┐', 's'); put(2, 9, ' │ OOOOOOOOOO │┐', 'a'); put(2, 10, ' │ OOOoOOOOOo ││', 'a'); put(2, 11, ' │OOOOOOOOOOOO│┘', 'a');
   put(2, 12, ' └─(O)────(O)─┘', 's'); put(3, 13, 'TRUCK', 'd');
-  belt(X0 - 1, X1 + 1, 13, T, inspSpeed());
+  belt(X0 - 1, X1 + 1, 13, T, 5);
   box(84, 14, 12, 5, 's'); put(86, 16, 'TRASH', 'd');
   man(30, 5, 'k'); put(26, 4, 'INSPECTOR', 'h');
   if (!auto && blink(T, 3)) put(27, 8, '\\ · · /', 'y');
-
   if (auto){
     box(SCAN - 8, 3, 17, 6, 'h', true); put(SCAN - 6, 4, 'AUTO-INSPECT', 'h');
-    put(SCAN - 4, 5, blink(T, 4) ? '[ ▓▒░ ]' : '[ ░▒▓ ]', 'g'); put(SCAN - 6, 7, 'optics Lv ' + up('optics'), 'd');
+    put(SCAN - 4, 5, blink(T, 4) ? '[ ▓▒░ ]' : '[ ░▒▓ ]', 'g'); put(SCAN - 6, 7, `Lv ${lvl('inspect')}  ${rateOf('inspect').toFixed(2)}/s`, 'd');
     put(SCAN, 9, '║', 's'); put(SCAN, 10, '║', 's');
     if (I.zap > 0){ put(SCAN - 2, 11, '\\ | /', 'y'); put(SCAN - 2, 12, ' ─┼─ ', 'y'); } else put(SCAN, 11, '▼', 'y');
   }
@@ -283,47 +287,34 @@ function inspDraw(){
   put(3, 16, 'BAD:', 'd'); put(8, 16, '@ mold', 'mold'); put(16, 16, '% rot', 'rot'); put(23, 16, '& leaf', 'g'); put(31, 16, '# twig', 'twig');
   put(41, 16, 'GOOD:', 'd'); put(47, 16, 'O', 'a');
   drawMastery('inspect', 18);
-  if (!mastered('inspect')){ if (blink(T, 2)) put(3, 20, '>>> CLICK THE BAD LEMONS BEFORE THEY REACH THE END <<<', 'h'); }
-  else if (!auto) put(3, 20, 'Auto-Inspector unlocked: buy it below!', 'g');
-  else put(3, 20, 'Line running. Upgrade belt and optics for more coins.', 'g');
+  if (auto) put(3, 20, 'Machine running — raise its level to speed this stage up.', 'g');
+  else if (!mastered('inspect')){ if (blink(T, 2)) put(3, 20, '>>> CLICK THE BAD LEMONS BEFORE THEY REACH THE END <<<', 'h'); }
+  else put(3, 20, 'Mastered! Buy the Auto-Inspector below.', 'g');
 }
 
 /* ======================================================================
    STAGE 2 — GRINDER  (rhythm crank + enzyme dosing)
    ====================================================================== */
-const BX = 30, BW = 41, CEN = 20;               // rhythm bar origin, width, centre cell
-const GR = { cur: 0, dir: 1, jam: 0, spin: 0, phase: 0, combo: 0, enzyme: 0, dropT: 0, doseCd: 0, hit: '', hitT: 0, autoT: 0, crankCd: 0 };
-const grZone = () => fx('g_crank', 'zone');
-const grBoost = () => fx('g_doser', 'boost');
-const grRate = () => up('g_motor') > 0 ? fx('g_rpm', 'rate') : 0;
-function grAutoRate(){ return grRate() * 2 * mult('grind') * grBoost(); }
+const BX = 30, BW = 41, CEN = 20, ZONE = 4;
+const GR = { cur: 0, dir: 1, jam: 0, spin: 0, phase: 0, combo: 0, enzyme: 0, dropT: 0, doseCd: 0, hit: '', hitT: 0, crankCd: 0 };
 function grCrank(){
-  if (GR.jam > 0 || GR.crankCd > 0) return;
+  if (automated('grind') || GR.jam > 0 || GR.crankCd > 0) return;
   GR.crankCd = .12;
-  const d = Math.abs(GR.cur - CEN), z = grZone();
-  const res = d <= Math.max(1, z / 3) ? 'perfect' : d <= z ? 'good' : 'miss';
-  if (res === 'miss'){
-    GR.jam = .8; GR.combo = 0; GR.hit = 'JAM!'; GR.hitT = .8; addMastery('grind', -15); pop(46, 15, 'jammed', 'r'); return;
-  }
+  const d = Math.abs(GR.cur - CEN);
+  const res = d <= ZONE / 3 ? 'perfect' : d <= ZONE ? 'good' : 'miss';
+  if (res === 'miss'){ GR.jam = .8; GR.combo = 0; GR.hit = 'JAM!'; GR.hitT = .8; addMastery('grind', -15); pop(46, 15, 'jammed', 'r'); return; }
   GR.combo++; G.gbest = Math.max(G.gbest, GR.combo); G.grinds++; GR.spin = .5;
-  const base = res === 'perfect' ? 4 : 2, enz = (GR.enzyme > 0 ? 1.5 : 1) * grBoost();
-  const gain = Math.round((base + Math.floor(GR.combo / 5)) * enz * mult('grind') * 10) / 10;
+  const gain = Math.round(((res === 'perfect' ? 4 : 2) + Math.floor(GR.combo / 5)) * (GR.enzyme > 0 ? 1.5 : 1) * mult('grind') * 10) / 10;
   G.coins += gain; GR.hit = res === 'perfect' ? 'PERFECT!' : 'GOOD'; GR.hitT = .6;
   pop(46, 15, '+' + gain, res === 'perfect' ? 'h' : 'y'); addMastery('grind', res === 'perfect' ? 9 : 6);
 }
 function grDose(){
-  if (GR.doseCd > 0) return;
+  if (automated('grind') || GR.doseCd > 0) return;
   GR.doseCd = 1.5;
-  const ph = GR.dropT;
-  if (ph >= 3.4 && ph <= 4.3){ GR.enzyme = 10; pop(66, 10, 'ENZYME!', 'p'); addMastery('grind', 12); }
-  else { pop(66, 10, 'spill', 'r'); }
+  if (GR.dropT >= 3.4 && GR.dropT <= 4.3){ GR.enzyme = 10; pop(66, 10, 'ENZYME!', 'p'); addMastery('grind', 12); }
+  else pop(66, 10, 'spill', 'r');
 }
-function grStep(dt, viewed){
-  if (up('g_motor') > 0){
-    GR.autoT += dt * grRate();
-    while (GR.autoT >= 1){ GR.autoT -= 1; G.coins += grAutoRate() / Math.max(.01, grRate()); G.grinds++; GR.spin = Math.max(GR.spin, .4); }
-  }
-  if (!viewed) return;
+function grStep(dt){
   GR.crankCd = Math.max(0, GR.crankCd - dt); GR.jam = Math.max(0, GR.jam - dt); GR.hitT = Math.max(0, GR.hitT - dt);
   GR.doseCd = Math.max(0, GR.doseCd - dt); GR.enzyme = Math.max(0, GR.enzyme - dt); GR.spin = Math.max(0, GR.spin - dt);
   GR.dropT = (GR.dropT + dt) % 4.5;
@@ -331,152 +322,355 @@ function grStep(dt, viewed){
     GR.cur += GR.dir * 28 * dt;
     if (GR.cur >= BW - 1){ GR.cur = BW - 1; GR.dir = -1; } if (GR.cur <= 0){ GR.cur = 0; GR.dir = 1; }
   }
-  const motor = up('g_motor') > 0;
-  GR.phase += dt * (GR.jam > 0 ? 0 : (GR.spin > 0 ? 16 : motor ? 4 + 3 * grRate() : 2));
+  const auto = automated('grind');
+  GR.phase += dt * (GR.jam > 0 ? 0 : auto ? 3 + 4 * rateOf('grind') : GR.spin > 0 ? 16 : 2);
 }
-function grClick(cx, cy){
-  if (cx >= 64 && cx <= 82 && cy >= 3 && cy <= 13) grDose(); else grCrank();
-}
+function grClick(cx, cy){ if (cx >= 64 && cx <= 82 && cy >= 3 && cy <= 13) grDose(); else grCrank(); }
 function grDraw(){
-  const motor = up('g_motor') > 0;
-  put(3, 2, 'COINS', 'd'); put(9, 2, String(Math.floor(G.coins)).padEnd(7), 'h');
+  const auto = automated('grind');
   put(19, 2, 'CRANKS', 'd'); put(26, 2, String(G.grinds).padEnd(7), 't');
   put(35, 2, 'COMBO', 'd'); put(41, 2, String(GR.combo).padEnd(4), GR.combo >= 5 ? 'h' : 't'); put(46, 2, `(best ${G.gbest})`, 'd');
-  const enzOn = GR.enzyme > 0 || up('g_doser') > 0;
-  put(60, 2, 'ENZYME', 'd'); put(67, 2, up('g_doser') > 0 ? `AUTO ×${grBoost().toFixed(2)}` : GR.enzyme > 0 ? `ON ${GR.enzyme.toFixed(0)}s` : 'off', enzOn ? 'p' : 'd');
-  if (motor) put(3, 3, `motor income ≈ ${grAutoRate().toFixed(1)} coins/s`, 'g');
-
-  // feed belt + hopper
+  put(60, 2, 'ENZYME', 'd'); put(67, 2, GR.enzyme > 0 ? `ON ${GR.enzyme.toFixed(0)}s` : 'off', GR.enzyme > 0 ? 'p' : 'd');
   belt(6, 33, 5, T, 5);
   for (let k = 0; k < 5; k++) put(6 + ((T * 6 + k * 5.6) % 27), 4, 'Oo0o'[(Math.floor(T * 4) + k) % 4], 'a');
   put(34, 4, '\\' + ' '.repeat(24) + '/', 's'); put(35, 5, '\\' + ' '.repeat(22) + '/', 's');
   for (let k = 0; k < 6; k++) put(37 + (k * 4) % 20, 4 + ((k * 3) % 2), 'O', k % 3 ? 'a' : 'ad');
-  // grinder body + blades
   box(34, 6, 28, 6, GR.jam > 0 ? 'r' : 's', true);
   const fr = ['\\|/', '-+-', '/|\\', '-x-'][Math.floor(GR.phase) % 4];
   [40, 48, 56].forEach(bx => { put(bx, 8, fr, GR.jam > 0 ? 'r' : 'k'); put(bx + 1, 7, '▲', 'd'); put(bx + 1, 9, '▼', 'd'); });
-  put(36, 6, GR.jam > 0 ? ' JAMMED ' : ' BLADES ', GR.jam > 0 ? 'r' : 'h');
-  // pulp output
-  const act = GR.spin > 0 || motor ? 1 : 0;
-  if (act) for (let k = 0; k < 6; k++) put(42 + k * 3, 12 + ((T * 6 + k * 1.3) % 3), '░▒▓'[k % 3], 'm');
+  put(36, 6, GR.jam > 0 ? ' JAMMED ' : auto ? ` MOTOR Lv ${lvl('grind')} ` : ' BLADES ', GR.jam > 0 ? 'r' : 'h');
+  if (GR.spin > 0 || auto) for (let k = 0; k < 6; k++) put(42 + k * 3, 12 + ((T * 6 + k * 1.3) % 3), '░▒▓'[k % 3], 'm');
   put(34, 15, '▄'.repeat(28), 's'); put(36, 14, '░▒░▒▓░▒░▒▓░▒░▒▓░▒░▒▓░▒░▒', 'm'); put(64, 14, '◄ "pulp"', 'h');
-  // enzyme flask + drop
   put(70, 3, ' ___ ', 's'); put(70, 4, '|   |', 's'); put(70, 5, '/ ~ \\', 'p'); put(69, 6, '/_____\\', 's'); put(68, 7, 'ENZYMES', 'p');
-  const ph = GR.dropT;
-  if (ph >= 2.9){ const f = (ph - 2.9) / 1.6, y = 8 + f * 4; put(72, y, ':', ph >= 3.4 && ph <= 4.3 ? 'h' : 'p'); }
-  put(66, 10, '['); co[10 * W + 66] = 'd'; put(75, 10, '◄ DOSE [E]', 'd'); put(70, 12, '▔▔▔▔▔', 'd');
-  if (enzOn) put(62, 10, '◄─ ~~~', 'p');
-
-  // rhythm bar
-  const z = grZone();
+  if (!auto){
+    const ph = GR.dropT;
+    if (ph >= 2.9){ const f = (ph - 2.9) / 1.6; put(72, 8 + f * 4, ':', ph >= 3.4 && ph <= 4.3 ? 'h' : 'p'); }
+    put(75, 10, '◄ DOSE [E]', 'd'); put(70, 12, '▔▔▔▔▔', 'd');
+    if (GR.enzyme > 0) put(62, 10, '◄─ ~~~', 'p');
+  } else put(62, 10, '◄─ ~~~', 'p');
   put(BX - 8, 17, 'RHYTHM', 'd');
   for (let i = 0; i < BW; i++){
     const d = Math.abs(i - CEN);
-    if (d <= Math.max(1, z / 3)) put(BX + i, 17, '█', 'h'); else if (d <= z) put(BX + i, 17, '▓', 'y'); else put(BX + i, 17, '·', 'd');
+    put(BX + i, 17, d <= ZONE / 3 ? '█' : d <= ZONE ? '▓' : '·', d <= ZONE / 3 ? 'h' : d <= ZONE ? 'y' : 'd');
   }
   put(BX - 1, 17, '[', 's'); put(BX + BW, 17, ']', 's');
   put(BX + Math.round(GR.cur), 18, GR.jam > 0 ? 'x' : '▲', GR.jam > 0 ? 'r' : 'k');
   if (GR.hitT > 0) put(BX + 17, 19, GR.hit.padEnd(10), GR.hit === 'JAM!' ? 'r' : GR.hit === 'GOOD' ? 'y' : 'h');
-  if (!mastered('grind')){ if (blink(T, 2)) put(3, 21, '>>> CLICK / SPACE WHEN ▲ IS IN THE GOLD · CATCH THE ENZYME DROP WITH [E] / CLICK FLASK <<<', 'h'); }
-  else if (!motor) put(3, 21, 'Auto-Grinder unlocked: buy it below!', 'g');
-  else put(3, 21, 'Motor running. You can still crank by hand for bonus coins.', 'g');
+  if (auto) put(3, 21, 'Motor running — raise its level to speed this stage up.', 'g');
+  else if (!mastered('grind')){ if (blink(T, 2)) put(3, 21, '>>> CLICK / SPACE WHEN ▲ IS IN THE GOLD · CATCH THE ENZYME DROP WITH [E] / CLICK FLASK <<<', 'h'); }
+  else put(3, 21, 'Mastered! Buy the Auto-Grinder below.', 'g');
   drawMastery('grind', 22);
 }
 
-/* ---------- stage registry ---------- */
+/* ======================================================================
+   STAGE 3 — MACERATION  (load a tank, wait, collect before it spoils)
+   ====================================================================== */
+const MC = { tanks: [0, 1, 2].map(() => ({ st: 'empty', t: 0 })) }, MC_X = [6, 38, 70], MC_BREW = 6, MC_WIN = 3;
+function mcClick(cx, cy){
+  if (automated('macerate')) return;
+  const i = MC_X.findIndex(x => cx >= x && cx <= x + 24); if (i < 0 || cy < 3 || cy > 17) return;
+  const k = MC.tanks[i], px = MC_X[i] + 12;
+  if (k.st === 'empty'){ k.st = 'brew'; k.t = 0; pop(px, 14, 'loaded', 's'); }
+  else if (k.st === 'brew') pop(px, 14, 'not ready', 'd');
+  else if (k.st === 'ready'){
+    const g = (k.t < MC_BREW + 1.2 ? 6 : 4) * mult('macerate'); G.coins += g; G.n.mac = (G.n.mac || 0) + 1;
+    pop(px, 14, '+' + g, 'y'); addMastery('macerate', 10); k.st = 'empty';
+  } else { addMastery('macerate', -8); G.coins = Math.max(0, G.coins - 1); pop(px, 14, 'spoiled -1', 'r'); k.st = 'empty'; }
+}
+function mcStep(dt){
+  if (automated('macerate')) return;
+  for (const k of MC.tanks){
+    if (k.st === 'empty') continue;
+    k.t += dt;
+    if (k.st === 'brew' && k.t >= MC_BREW) k.st = 'ready';
+    else if (k.st === 'ready' && k.t >= MC_BREW + MC_WIN) k.st = 'spoiled';
+  }
+}
+function mcDraw(){
+  const auto = automated('macerate');
+  put(19, 2, 'BATCHES', 'd'); put(27, 2, String(G.n.mac || 0).padEnd(6), 't');
+  MC_X.forEach((tx, i) => {
+    const k = MC.tanks[i];
+    let f, label, lc, col = 'm';
+    if (auto){ const pr = ((T * rateOf('macerate') / .9 / MC_BREW) + i / 3) % 1; f = pr; label = pr > .85 ? 'READY → auto-collected' : `BREWING ${Math.floor(pr * 100)}%`; lc = pr > .85 ? 'g' : 's'; }
+    else if (k.st === 'empty'){ f = 0; label = 'EMPTY — click to load'; lc = 'd'; }
+    else if (k.st === 'brew'){ f = k.t / MC_BREW; label = `BREWING ${Math.floor(f * 100)}%`; lc = 's'; }
+    else if (k.st === 'ready'){ f = 1; label = blink(T, 4) ? '★ READY — CLICK! ★' : '  READY — CLICK!  '; lc = 'h'; }
+    else { f = 1; label = 'SPOILED — click to clear'; lc = 'r'; col = 'rot'; }
+    box(tx, 3, 24, 13, k.st === 'ready' && !auto ? 'h' : k.st === 'spoiled' && !auto ? 'r' : 's', true);
+    put(tx + 2, 3, ` TANK ${i + 1} `, 'h');
+    const rows = Math.round(f * 10);
+    for (let r = 0; r < rows; r++) put(tx + 1, 14 - r, (r === rows - 1 ? '≈~' : '░▒').repeat(11), col);
+    if (f > 0 && f < 1 || auto) for (let b = 0; b < 3; b++) put(tx + 4 + b * 7, 14 - ((T * 2 + b * 1.7 + i) % 9), b % 2 ? 'o' : '°', 'y');
+    put(tx + 9, 4, `( ${'|/─\\'[Math.floor(T * 3 + i) % 4]} )`, 'h');
+    put(tx + 1, 16, label.slice(0, 23), lc);
+  });
+  if (auto) put(3, 20, `Tanks cycling automatically — Lv ${lvl('macerate')}: ${rateOf('macerate').toFixed(2)} units/s.`, 'g');
+  else if (!mastered('macerate')){ if (blink(T, 2)) put(3, 20, ">>> LOAD A TANK · CLICK AGAIN WHEN READY · DON'T LET IT SPOIL <<<", 'h'); }
+  else put(3, 20, 'Mastered! Buy the extra tanks below.', 'g');
+  drawMastery('macerate', 22);
+}
+
+/* ======================================================================
+   STAGE 4 — PRESS  (hold to build pressure, stay in the green band)
+   ====================================================================== */
+const PR = { p: 0, hold: false, prog: 0, burst: 0, t: 0, flash: 0, lo: 49, hi: 67 };
+function prHold(on){ if (!automated('press')) PR.hold = on; }
+function prStep(dt){
+  PR.t += dt; PR.flash = Math.max(0, PR.flash - dt);
+  const c = 58 + 14 * Math.sin(PR.t * .7); PR.lo = c - 9; PR.hi = c + 9;
+  if (automated('press')){ PR.p = c + 6 * Math.sin(PR.t * 3); PR.prog = (PR.prog + dt * rateOf('press') * 40) % 100; return; }
+  if (PR.burst > 0){ PR.burst -= dt; PR.p = Math.max(0, PR.p - 120 * dt); PR.prog = 0; return; }
+  PR.p = Math.max(0, Math.min(100, PR.p + (PR.hold ? 45 : -35) * dt));
+  if (PR.p >= 96){ PR.burst = 1.2; PR.prog = 0; addMastery('press', -15); pop(46, 14, 'BURST!', 'r'); return; }
+  if (PR.p >= PR.lo && PR.p <= PR.hi) PR.prog += 38 * dt; else PR.prog = Math.max(0, PR.prog - 15 * dt);
+  if (PR.prog >= 100){ PR.prog = 0; PR.flash = .6; const g = 5 * mult('press'); G.coins += g; G.n.press = (G.n.press || 0) + 1; pop(46, 14, '+' + g, 'y'); addMastery('press', 14); }
+}
+function prDraw(){
+  const auto = automated('press');
+  put(19, 2, 'BATCHES', 'd'); put(27, 2, String(G.n.press || 0).padEnd(6), 't');
+  put(3, 6, 'mash ►', 'm'); put(9, 6, '═══►', 's');
+  box(30, 3, 36, 11, PR.burst > 0 ? 'r' : 's', true); put(32, 3, PR.burst > 0 ? ' BURST! ' : ' HYDRAULIC PRESS ', PR.burst > 0 ? 'r' : 'h');
+  const py = 4 + Math.floor(PR.p / 100 * 5);
+  for (let y = 4; y < py; y++) put(47, y, '║║', 's');
+  put(32, py, '▓'.repeat(32), 'k');
+  for (let y = py + 1; y < 10; y++) put(32, y, '░▒'.repeat(16), 'm');
+  for (let x = 34; x < 64; x += 6) for (let y = 10; y < 13; y++) put(x, y, '║', 'm');
+  put(30, 14, '▀'.repeat(36), 's');
+  for (let k = 0; k < 6; k++) put(34 + k * 5, 15 + ((T * 5 + k * 1.1) % 1.8), ':', 'j');
+  put(67, 14, '═══► juice', 'j'); put(68, 8, 'waste ▒▒', 'd');
+  put(8, 17, 'PRESSURE', 'd');
+  for (let i = 0; i <= 50; i++){ const v = i * 2; put(18 + i, 17, v >= PR.lo && v <= PR.hi ? '▓' : v >= 92 ? '▒' : '·', v >= PR.lo && v <= PR.hi ? 'g' : v >= 92 ? 'r' : 'd'); }
+  put(17, 17, '[', 's'); put(69, 17, ']', 's'); put(18 + Math.round(PR.p / 2), 18, '▲', 'k');
+  put(8, 19, 'JUICE', 'd'); const n = Math.floor(PR.prog / 100 * 50); put(17, 19, '[' + '█'.repeat(n) + '░'.repeat(50 - n) + ']', PR.flash > 0 ? 'h' : 'g');
+  if (auto) put(3, 21, `Press running automatically — Lv ${lvl('press')}: ${rateOf('press').toFixed(2)} units/s.`, 'g');
+  else if (!mastered('press')){ if (blink(T, 2)) put(3, 21, ">>> HOLD CLICK / SPACE · KEEP ▲ IN THE GREEN · DON'T BURST THE SLEEVES <<<", 'h'); }
+  else put(3, 21, 'Mastered! Buy the hydraulic press below.', 'g');
+  drawMastery('press', 22);
+}
+
+/* ======================================================================
+   STAGE 5 — PASTEURIZER  (hot-to-cold hand-off: click at 88°C, then at 50°C)
+   ====================================================================== */
+const PS = { phase: 'heat', temp: 22, rest: 0, hit: '', hitT: 0, cyc: 0, bonus: 0 };
+function psFail(msg){ PS.hit = msg; PS.hitT = 1; PS.rest = 1; PS.phase = 'rest'; addMastery('pasteur', -10); pop(40, 12, 'spoiled', 'r'); }
+function psClick(){
+  if (automated('pasteur') || PS.rest > 0) return;
+  const t = PS.temp;
+  if (PS.phase === 'heat'){
+    if (Math.abs(t - 88) <= 4){ PS.bonus = Math.abs(t - 88) <= 1.5 ? 1 : 0; PS.phase = 'cool'; PS.hit = PS.bonus ? 'PERFECT HEAT' : 'HEATED'; PS.hitT = .8; addMastery('pasteur', 8); }
+    else psFail(t < 88 ? 'UNDER-HEATED' : 'SCORCHED');
+  } else if (PS.phase === 'cool'){
+    if (Math.abs(t - 50) <= 4){
+      const b = (Math.abs(t - 50) <= 1.5 ? 1 : 0) + PS.bonus, g = (6 + b * 2) * mult('pasteur'); G.coins += g; G.n.past = (G.n.past || 0) + 1;
+      PS.hit = 'BATCH DONE'; PS.hitT = .8; PS.rest = .8; PS.phase = 'rest'; pop(40, 12, '+' + g, 'y'); addMastery('pasteur', 10);
+    } else psFail(t > 50 ? 'NOT COOLED' : 'OVER-COOLED');
+  }
+}
+function psStep(dt){
+  PS.hitT = Math.max(0, PS.hitT - dt);
+  if (automated('pasteur')){ PS.cyc = (PS.cyc + dt * rateOf('pasteur') * .5) % 1; const x = PS.cyc; PS.phase = x < .5 ? 'heat' : 'cool'; PS.temp = x < .5 ? 22 + 66 * (x / .5) : 88 - 38 * ((x - .5) / .5); return; }
+  if (PS.rest > 0){ PS.rest -= dt; if (PS.rest <= 0){ PS.phase = 'heat'; PS.temp = 22; } return; }
+  if (PS.phase === 'heat'){ PS.temp += 30 * dt; if (PS.temp >= 100) psFail('OVERHEATED'); }
+  else if (PS.phase === 'cool'){ PS.temp -= 24 * dt; if (PS.temp <= 38) psFail('TOO COLD'); }
+}
+function psDraw(){
+  const auto = automated('pasteur'), t = PS.temp;
+  put(19, 2, 'BATCHES', 'd'); put(27, 2, String(G.n.past || 0).padEnd(6), 't');
+  box(6, 4, 56, 9, 's', true);
+  for (let x = 7; x < 34; x++) for (let y = 5; y < 12; y++) put(x, y, x % 3 === 0 ? '│' : (x + y) % 7 === 0 ? '░' : ' ', 'r');
+  for (let x = 34; x < 61; x++) for (let y = 5; y < 12; y++) put(x, y, x % 3 === 0 ? '│' : (x + y) % 7 === 0 ? '░' : ' ', 'wd');
+  put(8, 4, ' HEATING ', 'r'); put(36, 4, ' COOLING ', 'w');
+  for (let x = 2; x < 66; x++){ put(x, 8, '─', 'd'); put(x, 9, ((x - Math.floor(T * 6)) % 4 + 4) % 4 === 0 ? 'o' : '-', t > 65 ? 'r' : t > 42 ? 'j' : 'w'); put(x, 10, '─', 'd'); }
+  put(2, 12, '22°C ►', 'w'); put(60, 14, '► 50°C', 'w');
+  put(8, 15, PS.phase === 'cool' ? 'PHASE: COOL — click when it hits 50°C' : PS.phase === 'heat' ? 'PHASE: HEAT — click when it hits 88°C' : 'resetting…', PS.phase === 'cool' ? 'w' : 'r');
+  if (PS.hitT > 0) put(8, 17, PS.hit.padEnd(14), /DONE|HEAT|HEATED/.test(PS.hit) && !/UNDER|SCORCH|OVER/.test(PS.hit) ? 'g' : 'r');
+  put(72, 3, 'TEMP °C', 'd');
+  for (let r = 0; r < 14; r++){ const tr = 100 - r * (80 / 13); put(73, 4 + r, tr <= t ? '█' : '░', tr <= t ? (t > 70 ? 'r' : t > 45 ? 'h' : 'w') : 'd'); put(72, 4 + r, '│', 's'); put(74, 4 + r, '│', 's'); }
+  put(76, 6, '◄ 88°C HEAT', 'r'); put(76, 12, '◄ 50°C COOL', 'w'); put(72, 18, `${Math.round(t)}°C`, 'k');
+  if (auto) put(3, 21, `Heat exchanger cycling — Lv ${lvl('pasteur')}: ${rateOf('pasteur').toFixed(2)} units/s.`, 'g');
+  else if (!mastered('pasteur')){ if (blink(T, 2)) put(3, 21, '>>> CLICK WHEN THE TEMPERATURE HITS 88°C, THEN AGAIN AT 50°C <<<', 'h'); }
+  else put(3, 21, 'Mastered! Buy the heat exchanger below.', 'g');
+  drawMastery('pasteur', 22);
+}
+
+/* ======================================================================
+   STAGE 6 — FINAL QC  (memorize the target taste, then dial it in)
+   ====================================================================== */
+const QC = { t: [10, 10, 10], v: [10, 10, 10], phase: 'show', pt: 0, ok: false }, QN = ['FLAVOR', 'COLOR', 'SUGAR'], QX = 24;
+function qcNew(){ QC.t = [0, 1, 2].map(() => 3 + Math.floor(Math.random() * 15)); QC.v = [10, 10, 10]; QC.phase = 'show'; QC.pt = 0; }
+qcNew();
+function qcClick(cx, cy){
+  if (automated('qc') || QC.phase !== 'guess') return;
+  for (let i = 0; i < 3; i++) if (Math.abs(cy - (8 + i * 3)) <= 1.2 && cx >= QX - 1 && cx <= QX + 22){ QC.v[i] = Math.max(0, Math.min(20, Math.round(cx - QX))); return; }
+  if (cx >= QX && cx <= QX + 16 && cy >= 18 && cy <= 20){
+    QC.ok = QC.v.every((v, i) => Math.abs(v - QC.t[i]) <= 2); QC.phase = 'result'; QC.pt = 0;
+    if (QC.ok){ const g = 6 * mult('qc'); G.coins += g; G.n.qc = (G.n.qc || 0) + 1; pop(46, 14, '+' + g, 'y'); addMastery('qc', 14); }
+    else { addMastery('qc', -8); pop(46, 14, 'off-taste', 'r'); }
+  }
+}
+function qcStep(dt){
+  QC.pt += dt;
+  if (automated('qc')){ for (let i = 0; i < 3; i++) QC.v[i] = 10 + 8 * Math.sin(T * (.6 + rateOf('qc') * .3) + i * 2); QC.phase = 'auto'; return; }
+  if (QC.phase === 'auto') qcNew();
+  if (QC.phase === 'show' && QC.pt > 2.4){ QC.phase = 'guess'; QC.pt = 0; }
+  else if (QC.phase === 'result' && QC.pt > 1.6) qcNew();
+}
+function qcDraw(){
+  const auto = automated('qc');
+  put(19, 2, 'APPROVED', 'd'); put(28, 2, String(G.n.qc || 0).padEnd(6), 't');
+  put(3, 5, QC.phase === 'show' ? `MEMORIZE THE TARGET…  ${Math.max(0, 2.4 - QC.pt).toFixed(1)}s` : QC.phase === 'guess' ? 'Now click each bar to set the taste, then SUBMIT.' : QC.phase === 'result' ? (QC.ok ? 'APPROVED ✓' : 'REJECTED ✗ — the ▼ shows the target') : `AUTO-QC LAB Lv ${lvl('qc')} — ${rateOf('qc').toFixed(2)} units/s`, QC.phase === 'result' ? (QC.ok ? 'g' : 'r') : 'h');
+  for (let i = 0; i < 3; i++){
+    const y = 8 + i * 3, v = QC.v[i];
+    put(8, y, QN[i], 't'); put(QX - 1, y, '[', 's'); put(QX + 21, y, ']', 's');
+    for (let k = 0; k <= 20; k++) put(QX + k, y, k <= Math.round(v) ? '▓' : '·', k <= Math.round(v) ? 'y' : 'd');
+    put(QX + Math.round(v), y - 0, '◆', 'h');
+    if (QC.phase === 'show' || QC.phase === 'result') put(QX + QC.t[i], y - 1, '▼', 'p');
+    put(QX + 25, y, auto ? '' : `${Math.round(v)}`.padStart(2), 't');
+    if (QC.phase === 'result') put(QX + 29, y, Math.abs(v - QC.t[i]) <= 2 ? '✓' : '✗', Math.abs(v - QC.t[i]) <= 2 ? 'g' : 'r');
+  }
+  if (!auto){ box(QX, 18, 17, 3, QC.phase === 'guess' ? 'h' : 'd'); put(QX + 5, 19, 'SUBMIT', QC.phase === 'guess' ? 'h' : 'd'); }
+  put(70, 6, '  ___  ', 'k'); put(70, 7, ' |▒▒▒| ', 'j'); put(70, 8, ' |▒▒▒| ', 'j'); put(70, 9, '  \\▒/  ', 'j'); put(70, 10, '   |   ', 'k'); put(69, 11, ' ─────', 'k'); put(70, 12, 'sample', 'd');
+  if (auto) put(3, 21, 'Lab running — raise its level to inspect more units per second.', 'g');
+  else if (!mastered('qc')){ if (blink(T, 2)) put(3, 21, '>>> REMEMBER THE TARGET TASTE, SET THE BARS FROM MEMORY (±2), SUBMIT <<<', 'h'); }
+  else put(3, 21, 'Mastered! Buy the Auto-QC lab below.', 'g');
+  drawMastery('qc', 22);
+}
+
+/* ======================================================================
+   OVERVIEW  (production line + bottleneck finder)
+   ====================================================================== */
+function ovDraw(){
+  const L = lineStats();
+  put(3, 3, `LINE ${L.rate.toFixed(2)} units/s  ·  ${SIM.income.toFixed(1)} coins/s`, L.chain.length ? 'g' : 'd');
+  put(3, 5, 'STAGE', 'd'); put(17, 5, 'LEVEL', 'd'); put(27, 5, 'SPEED (units/s)', 'd'); put(60, 5, 'QUEUE', 'd'); put(76, 5, 'STATUS', 'd');
+  const rates = STAGES.map(s => rateOf(s.id)), scale = Math.max(1, ...rates) * 1.15;
+  const rows = STAGES.map(s => s.name).concat(PLANNED);
+  rows.forEach((n, i) => {
+    const y = 7 + i * 2, s = STAGES[i], bn = L.chain.length > 1 && s && L.chain[L.bott] === s;
+    put(3, y, `[${i + 1}] ${n}`, !s ? 'd' : bn ? 'r' : 't');
+    if (!s || !G.unlocked[s.id]){ put(17, y, '(locked)', 'd'); return; }
+    if (!automated(s.id)){ put(17, y, 'MANUAL', 'h'); put(27, y, 'you run this stage by hand — master it, then automate', 'd'); return; }
+    put(17, y, `Lv ${lvl(s.id)}/${maxLvl(s.id)}`, 't');
+    const r = rateOf(s.id), n2 = Math.round(r / scale * 20);
+    put(27, y, '█'.repeat(n2) + '░'.repeat(20 - n2), bn ? 'r' : 'g'); put(48, y, r.toFixed(2), 't');
+    const inChain = L.chain.includes(s), q = SIM.buf[s.id] || 0;
+    if (inChain && STAGES.indexOf(s) > 0){ const qn = Math.round(Math.min(1, q / QUEUE_CAP) * 10); put(60, y, '▒'.repeat(qn) + '░'.repeat(10 - qn), q > QUEUE_CAP * .8 ? 'y' : 'd'); put(71, y, String(Math.round(q)), 't'); }
+    const st = SIM.state[s.id];
+    if (bn) put(76, y, 'BOTTLENECK', 'r');
+    else if (st === 'starved') put(76, y, `idle ${Math.round((1 - SIM.util[s.id]) * 100)}%`, 's');
+    else if (st === 'blocked') put(76, y, 'blocked', 'y');
+    else if (st === 'running') put(76, y, 'running', 'g');
+    if (inChain && i < L.chain.length - 1){ put(8, y + 1, '▼', 'd'); if (blink(T + i, 3)) put(10, y + 1, '· · ·', 'd'); }
+  });
+  // advice
+  const adv = [];
+  if (L.chain.length < 2) adv.push('Automate two or more stages to see how the line balances.');
+  else {
+    const b = L.chain[L.bott];
+    adv.push(`BOTTLENECK: ${b.title} (${rateOf(b.id).toFixed(2)}/s) limits the whole line.`);
+    const slack = L.chain.filter(s => s !== b).sort((p, q) => rateOf(q.id) - rateOf(p.id))[0];
+    if (slack) adv.push(`${slack.title} could do ${rateOf(slack.id).toFixed(2)}/s but only runs at ${Math.round(rateOf(slack.id) ? L.rate / rateOf(slack.id) * 100 : 0)}% — more levels there are wasted until ${b.title} catches up.`);
+  }
+  const missing = PLANNED.length + (STAGES.length - L.chain.length);
+  adv.push(missing ? `Line incomplete: ${missing} stage${missing > 1 ? 's' : ''} still to automate or build.` : 'LINE COMPLETE! Now balance the levels: upgrade the bottleneck, then the next one.');
+  adv.forEach((t, k) => put(3, 20 + k, t.slice(0, 94), k === 0 && L.chain.length > 1 ? 'r' : k === 2 ? 'd' : 's'));
+}
+
+/* ---------- stage registry (step runs only while the stage is on screen) ---------- */
 const MODS = {
-  inspect: { step: inspStep, draw: inspDraw, click: inspClick, rate: inspRate },
-  grind:   { step: grStep,   draw: grDraw,   click: grClick,   rate: grAutoRate },
+  overview: { draw: ovDraw, click: () => {} },
+  inspect:  { step: inspStep, draw: inspDraw, click: inspClick },
+  grind:    { step: grStep,   draw: grDraw,   click: grClick },
+  macerate: { step: mcStep, draw: mcDraw, click: mcClick, popY: 14 },
+  press:    { step: prStep, draw: prDraw, click: () => prHold(true), release: () => prHold(false), popY: 14 },
+  pasteur:  { step: psStep, draw: psDraw, click: psClick, popY: 12 },
+  qc:       { step: qcStep, draw: qcDraw, click: qcClick, popY: 14 },
 };
-const stageIdx = id => STAGES.findIndex(s => s.id === id);
-const automated = id => up(STAGES[stageIdx(id)].automate) > 0;
 
 /* ---------- frame drawing ---------- */
 function draw(){
   clear();
   box(0, 0, W, H, 'd');
-  const si = stageIdx(view), s = STAGES[si];
-  put(2, 0, ` ${si + 1}/6 · ${s.title.toUpperCase()} ${automated(view) ? '· AUTO' : '· MANUAL'} `, 'h');
+  const si = stageIdx(view);
+  put(2, 0, view === 'overview' ? ' OVERVIEW · PRODUCTION LINE ' : ` ${si + 1}/${STAGES.length + PLANNED.length} · ${stageOf(view).title.toUpperCase()} ${automated(view) ? '· AUTO' : '· MANUAL'} `, 'h');
+  put(3, 2, 'COINS', 'd'); put(9, 2, String(Math.floor(G.coins)).padEnd(7), 'h');
+  if (view !== 'overview'){ const L = lineStats(); put(3, 3, `line ${L.rate.toFixed(2)}/s · ${SIM.income.toFixed(1)} coins/s`, L.chain.length ? 'g' : 'd'); }
   MODS[view].draw();
-  for (const p of pops) put(p.x - 1, (view === 'inspect' ? Y : 15) - 1 - p.t * 2.5 + (view === 'inspect' ? 0 : 1), p.text, p.col);
-  // stage strip
-  const all = STAGES.map(x => x.name).concat(COMING);
-  all.forEach((n, i) => {
-    const x = 3 + i * 16, st = STAGES[i];
-    let line2, c;
-    if (!st){ line2 = '(locked)'; c = 'd'; }
-    else if (!G.unlocked[st.id]){ line2 = `locked ${st.unlock.cost}¢`; c = 'd'; }
-    else if (automated(st.id)){ line2 = 'AUTOMATED ✓'; c = 'g'; }
-    else { line2 = 'ACTIVE'; c = 'h'; }
-    put(x, 24, `[${i + 1}] ${n}`, st && st.id === view ? 'h' : c); put(x, 25, line2, c);
-    if (i < 5) put(x + 13, 24, '►', 'd');
-  });
-  const nxt = STAGES.find(x => !G.unlocked[x.id]);
-  put(3, 26, nxt ? `Next stage: ${nxt.title} — ${nxt.unlock.cost} coins (needs ${defOf(nxt.unlock.needs).title.replace(/^\S+\s/, '')})` : 'More stages coming soon', 'd');
+  if (view !== 'overview'){
+    for (const p of pops) put(p.x - 1, (MODS[view].popY || (view === 'inspect' ? Y : 16)) - 1 - p.t * 2.5, p.text, p.col);
+    const all = STAGES.map(x => x.name).concat(PLANNED);
+    all.forEach((n, i) => {
+      const x = 3 + i * 16, st = STAGES[i];
+      let line2, c;
+      if (!st || !G.unlocked[st.id]){ line2 = '(locked)'; c = 'd'; }
+      else if (automated(st.id)){ line2 = `AUTO Lv ${lvl(st.id)}`; c = 'g'; }
+      else { line2 = 'ACTIVE'; c = 'h'; }
+      put(x, 24, `[${i + 1}] ${n}`, st && st.id === view ? 'h' : c); put(x, 25, line2, c);
+      if (i < 5) put(x + 13, 24, '►', 'd');
+    });
+    const nxt = STAGES[si + 1];
+    put(3, 26, automated(view) ? (nxt ? 'Next stage unlocked.' : 'More stages coming soon.') : (nxt ? `Automate ${stageOf(view).title} to unlock ${nxt.title}.` : 'Automate this stage to complete the line so far.'), 'd');
+  }
 }
 
 /* ---------- tabs ---------- */
 const tabs = document.getElementById('tabs');
 function renderTabs(){
   tabs.innerHTML = '';
-  STAGES.forEach((s, i) => {
-    const b = document.createElement('button'), ok = G.unlocked[s.id];
-    b.textContent = `${ok ? '' : '🔒 '}${i + 1} ${s.title}`; b.disabled = !ok; b.className = s.id === view ? 'on' : '';
-    b.onclick = () => setView(s.id); tabs.appendChild(b);
-  });
-  COMING.forEach((n, k) => { const b = document.createElement('button'); b.textContent = `🔒 ${STAGES.length + k + 1} ${n === 'FINAL QC' ? 'Final QC' : n[0] + n.slice(1).toLowerCase()}`; b.disabled = true; tabs.appendChild(b); });
+  const mk = (label, id, ok, isNew) => { const b = document.createElement('button'); b.textContent = label; b.disabled = !ok;
+    b.className = (id === view ? 'on ' : '') + (isNew ? 'new' : ''); if (ok) b.onclick = () => setView(id); tabs.appendChild(b); };
+  mk('📊 Overview', 'overview', true, false);
+  STAGES.forEach((s, i) => { const ok = G.unlocked[s.id]; mk(`${ok ? '' : '🔒 '}${i + 1} ${s.title}${ok && !G.seen[s.id] ? ' ✨NEW' : ''}`, s.id, ok, ok && !G.seen[s.id]); });
+  PLANNED.forEach((n, k) => mk(`🔒 ${STAGES.length + k + 1} ${n === 'FINAL QC' ? 'Final QC' : n[0] + n.slice(1).toLowerCase()}`, '', false, false));
 }
 function setView(id){
-  view = id; pops = []; renderTabs(); shopKey = ''; renderShop();
-  const s = STAGES[stageIdx(id)]; document.getElementById('title').textContent = `🍋 LEMONADE TYCOON :: STAGE ${stageIdx(id) + 1}`;
-  document.getElementById('shopT').textContent = `UPGRADES — ${s.title.toUpperCase()}`;
+  view = id; pops = []; if (id !== 'overview') G.seen[id] = true;
+  renderTabs(); shopKey = ''; renderShop();
+  document.getElementById('title').textContent = id === 'overview' ? '🍋 LEMONADE TYCOON :: OVERVIEW' : `🍋 LEMONADE TYCOON :: STAGE ${stageIdx(id) + 1}`;
+  document.getElementById('shopT').textContent = id === 'overview' ? 'UPGRADES — WHOLE LINE' : `UPGRADE — ${stageOf(id).title.toUpperCase()}`;
 }
 
-/* ---------- shop (generated from CONFIG) ---------- */
+/* ---------- shop: one card per stage, generated from CONFIG ---------- */
 const shop = document.getElementById('shop');
 let shopKey = '';
 function renderShop(){
-  const cards = [];
-  const nxt = STAGES.find(x => !G.unlocked[x.id]);
-  if (nxt){
-    const need = nxt.unlock.needs, ok = up(need) > 0;
-    cards.push({ kind: 'unlock', id: nxt.id, title: `🔓 Unlock Stage ${stageIdx(nxt.id) + 1}: ${nxt.title}`, cost: nxt.unlock.cost,
-      desc: 'Open the next job in the factory.', lock: ok ? '' : 'Needs ' + defOf(need).title.replace(/^\S+\s/, '') });
-  }
-  UPGRADES.filter(u => u.stage === view).forEach(d => {
-    const l = up(d.id), n = d.levels.length, maxed = l >= n;
-    let now = '';
-    if (d.show){ const cur = l > 0 ? d.levels[l - 1] : d.base; now = 'Now: ' + d.show(cur) + (maxed ? '' : '  →  Next: ' + d.show(d.levels[l])); }
-    cards.push({ kind: 'up', id: d.id, title: d.title + (n > 1 ? `  (Lv ${l}/${n})` : ''), desc: d.desc, now, cost: maxed ? 0 : d.levels[l].cost, owned: maxed, lock: lockReason(d) });
+  const L = lineStats(), cards = [];
+  STAGES.filter(s => G.unlocked[s.id] && (view === 'overview' || s.id === view)).forEach(s => {
+    const l = lvl(s.id), n = maxLvl(s.id), lv_ = s.upgrade.levels, maxed = l >= n;
+    const bn = L.chain.length > 1 && L.chain[L.bott] === s;
+    const now = l === 0 ? 'Now: manual' : `Now: ${lv_[l - 1].rate.toFixed(2)} units/s`;
+    const nxt = maxed ? '' : `  →  ${l === 0 ? 'Auto' : 'Next'}: ${lv_[l].rate.toFixed(2)} units/s`;
+    cards.push({ id: s.id, title: `${s.upgrade.title}  (Lv ${l}/${n})`, bn,
+      desc: l === 0 ? `Master the job by hand, then install this machine. It runs ${s.title} by itself and unlocks the next process.`
+                    : 'Raises this stage\'s speed. Remember: the line only runs as fast as its slowest stage.',
+      now: now + nxt + (bn ? '   ◄ BOTTLENECK' : ''), cost: maxed ? 0 : lv_[l].cost, owned: maxed, lock: l === 0 && !mastered(s.id) ? 'Reach 100% mastery first' : '' });
   });
-  if (view === STAGES[STAGES.length - 1].id) cards.push({ kind: 'soon', title: '🔒 Stage 3: Maceration', desc: 'The next job is not built yet.' });
-  const key = view + JSON.stringify(cards) + (Math.floor(G.coins) >= Math.min(...cards.filter(c => c.cost).map(c => c.cost), 1e9) ? 1 : 0) + cards.map(c => c.cost && G.coins >= c.cost ? 1 : 0).join('');
+  const key = view + JSON.stringify(cards) + cards.map(c => c.cost && G.coins >= c.cost ? 1 : 0).join('');
   if (key === shopKey) return; shopKey = key;
   shop.innerHTML = '';
   cards.forEach(c => {
-    const d = document.createElement('div'); d.className = 'card' + (c.owned ? ' owned' : '') + (c.kind === 'unlock' ? ' unlock' : '') + (c.kind === 'soon' ? ' soon' : '');
-    d.innerHTML = `<h3>${c.title}</h3><p>${c.desc}</p>` + (c.now ? `<div class="now">${c.now}</div>` : '');
-    if (c.kind === 'soon'){ shop.appendChild(d); return; }
+    const d = document.createElement('div'); d.className = 'card' + (c.owned ? ' owned' : '') + (c.bn ? ' bottleneck' : '');
+    d.innerHTML = `<h3>${c.title}</h3><p>${c.desc}</p><div class="now">${c.now}</div>`;
     const b = document.createElement('button');
-    if (c.owned){ b.textContent = c.kind === 'up' && UPGRADES.find(u => u.id === c.id).levels.length > 1 ? 'MAX' : 'OWNED ✓'; b.disabled = true; }
+    if (c.owned){ b.textContent = 'MAX'; b.disabled = true; }
     else if (c.lock){ b.textContent = c.lock; b.disabled = true; }
-    else { b.textContent = `Buy · ${c.cost} 🪙`; b.disabled = G.coins < c.cost; b.onclick = () => (c.kind === 'unlock' ? unlockStage(c.id) : buy(c.id)); }
+    else { b.textContent = `Buy · ${c.cost} 🪙`; b.disabled = G.coins < c.cost; b.onclick = () => buy(c.id); }
     d.appendChild(b); shop.appendChild(d);
   });
 }
 function buy(id){
-  const d = defOf(id), l = up(id);
-  if (!d || l >= d.levels.length || lockReason(d)) return;
-  const cost = d.levels[l].cost; if (G.coins < cost) return;
-  G.coins -= cost; G.up[id] = l + 1;
-  say(`${d.title} → ${d.levels.length > 1 ? 'Lv ' + (l + 1) : 'online'}!`);
-  shopKey = ''; renderShop(); save();
-}
-function unlockStage(id){
-  const s = STAGES[stageIdx(id)];
-  if (G.unlocked[id] || G.coins < s.unlock.cost || up(s.unlock.needs) < 1) return;
-  G.coins -= s.unlock.cost; G.unlocked[id] = true; save();
-  setView(id); say(`🔓 ${s.title} unlocked! Do the job by hand to master it.`);
+  const s = stageOf(id), l = lvl(id);
+  if (!s || l >= maxLvl(id) || !G.unlocked[id]) return;
+  if (l === 0 && !mastered(id)) return;
+  const cost = s.upgrade.levels[l].cost; if (G.coins < cost) return;
+  G.coins -= cost; G.lvl[id] = l + 1;
+  if (l === 0){                                           // automation: unlock the next process
+    const nxt = STAGES[stageIdx(id) + 1];
+    if (nxt && !G.unlocked[nxt.id]){ G.unlocked[nxt.id] = true; say(`🤖 ${plainName(s.upgrade.title)} online! 🔓 ${nxt.title} unlocked — check its tab.`); }
+    else say(`🤖 ${plainName(s.upgrade.title)} online!`);
+  } else say(`${plainName(s.upgrade.title)} → Lv ${l + 1}`);
+  renderTabs(); shopKey = ''; renderShop(); save();
 }
 
 /* ---------- input ---------- */
@@ -484,30 +678,31 @@ scr.addEventListener('pointerdown', e => {
   const r = scr.getBoundingClientRect();
   MODS[view].click((e.clientX - r.left) / (r.width / W), (e.clientY - r.top) / (r.height / H));
 });
+window.addEventListener('pointerup', () => { const m = MODS[view]; if (m.release) m.release(); });
 document.addEventListener('keydown', e => {
-  if (view !== 'grind') return;
-  if (e.code === 'Space'){ e.preventDefault(); grCrank(); }
-  if (e.key === 'e' || e.key === 'E') grDose();
+  if (e.code === 'Space' && ['grind', 'press', 'pasteur'].includes(view)){ e.preventDefault(); if (e.repeat) return; MODS[view].click(0, 0); if (view === 'grind') return; }
+  if (view === 'grind' && (e.key === 'e' || e.key === 'E')) grDose();
 });
+document.addEventListener('keyup', e => { if (e.code === 'Space'){ const m = MODS[view]; if (m.release) m.release(); } });
 document.getElementById('reset').onclick = () => {
   if (!confirm('Reset all progress?')) return;
-  G = freshState(); pops = []; inspInit(); GR.enzyme = 0; GR.combo = 0; I.combo = 0; setView('inspect'); save(); say('Save reset.');
+  G = freshState(); pops = []; inspInit(); GR.enzyme = 0; GR.combo = 0; I.combo = 0; SIM.buf = {}; SIM.income = 0; setView('inspect'); save(); say('Save reset.');
 };
 
 /* ---------- boot ---------- */
 inspInit();
 const secsAway = Math.min(3600, (Date.now() - G.t) / 1000);
 if (secsAway > 30){
-  let per = 0; STAGES.forEach(s => { if (G.unlocked[s.id] && automated(s.id)) per += Math.max(0, MODS[s.id].rate()); });
-  const away = Math.floor(secsAway * per * .5);
-  if (away > 0){ G.coins += away; setTimeout(() => say(`Welcome back! Your factory earned ${away} 🪙 while you were away.`), 100); }
+  const away = Math.floor(secsAway * lineStats().income * .5);
+  if (away > 0){ G.coins += away; setTimeout(() => say(`Welcome back! Your line earned ${away} 🪙 while you were away.`), 100); }
 }
-fit(); setView('inspect');
+fit(); setView(lineStats().chain.length ? 'overview' : 'inspect');
 let last = performance.now(), acc = 0, saveT = 0;
 function frame(now){
   const dt = Math.min(.1, (now - last) / 1000); last = now;
   T += dt;
-  STAGES.forEach(s => { if (G.unlocked[s.id]) MODS[s.id].step(dt, s.id === view); });
+  simStep(dt);
+  const m = MODS[view]; if (m.step) m.step(dt);
   pops = pops.filter(p => (p.t += dt) < 1);
   if (msgT > 0 && (msgT -= dt) <= 0) document.getElementById('msg').textContent = '';
   acc += dt; saveT += dt;
@@ -516,7 +711,7 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 window.addEventListener('beforeunload', save);
-window.__T = { get G(){ return G; }, GR, I, buy, unlockStage, setView, grCrank, grDose, inspClick, CEN, get view(){ return view; }, UPGRADES, STAGES };
+window.__T = { get G(){ return G; }, GR, I, SIM, buy, setView, grCrank, grDose, CEN, STAGES, MC, PR, PS, QC, mcClick, psClick, qcClick, prHold, lineStats, get view(){ return view; } };
 requestAnimationFrame(frame);
 </script>
 </body>
