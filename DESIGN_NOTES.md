@@ -120,20 +120,19 @@ price they **pay** for lemons.
   stops when lemons run out or cup storage is full.
 - **5 upgrade levels:** each costs money and adds 25% of the base rate.
 
-Scaled from the reference game: an AutoClipper costs $5 and makes 1 clip/s
-(`clipClick(clipperBoost * clipmakerLevel / 100)` every 10 ms), and the
-"Improved AutoClippers" projects add +25%, +50%, +75% to `clipperBoost`.
-The reference pays for those boosts in Operations, not cash, so the
-cash costs below are our own: each level is about 1.4x the last.
+Same math as the reference game. An AutoClipper costs `5`, then
+`1.1^level + 5` after each purchase, and makes 1 clip/s. The "Improved
+AutoClippers" projects add `+.25` to `clipperBoost`. Here the cost formula
+is used as is and each level uses the +25% step.
 
 | Level | Rate (cups/s) | Cost to reach |
 |---|---|---|
-| 1 (buy) | 1.00 | $5 |
-| 2 | 1.25 | $7 |
-| 3 | 1.50 | $10 |
-| 4 | 1.75 | $14 |
-| 5 | 2.00 | $20 |
-| 6 | 2.25 | $28 |
+| 1 (buy) | 1.00 | $5.00 |
+| 2 | 1.25 | $6.10 |
+| 3 | 1.50 | $6.21 |
+| 4 | 1.75 | $6.33 |
+| 5 | 2.00 | $6.46 |
+| 6 | 2.25 | $6.61 |
 
 **Variable lemon price.** The price to buy lemons moves, so there are
 *expensive times* and *cheap times* to buy. It copies the wire price in

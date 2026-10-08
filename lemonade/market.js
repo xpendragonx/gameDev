@@ -30,11 +30,12 @@ const MAX_LEMONS = 200;
 
 // Auto squeezer: level 1 is the purchase, levels 2-6 are the 5 upgrades.
 // AUTO_COSTS[i] is the price of going from level i to level i+1.
-// Scaled from index_3.html: an AutoClipper costs $5 and makes 1 clip/s, and
-// the "Improved AutoClippers" projects add +25% each time.
+// Same math as index_3.html: the first AutoClipper costs $5 and makes 1 clip/s
+// (clipperCost = 1.1^level + 5 after each purchase), and each "Improved
+// AutoClippers" boost adds +25% of the base rate (clipperBoost += .25).
 const AUTO_RATES = [0, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25];   // cups per second
-const AUTO_COSTS = [5, 7, 10, 14, 20, 28];
 const AUTO_MAX = AUTO_RATES.length - 1;
+const AUTO_COST_BASE = 5;
 
 const newState = () => ({
   cash: 0, stock: 0, lemons: 20, price: 0.25, mktLvl: 1,
@@ -54,7 +55,11 @@ function squeeze(s) {
 }
 
 const autoRate = (s) => AUTO_RATES[s.autoLvl];
-const autoCost = (s) => (s.autoLvl >= AUTO_MAX ? null : AUTO_COSTS[s.autoLvl]);
+const autoCost = (s) => {
+  if (s.autoLvl >= AUTO_MAX) return null;
+  if (s.autoLvl === 0) return AUTO_COST_BASE;
+  return Math.round((Math.pow(1.1, s.autoLvl) + AUTO_COST_BASE) * 100) / 100;   // reference: 1.1^level + 5
+};
 
 // Buy the auto squeezer, or its next upgrade. Costs money.
 function buyAuto(s) {
@@ -138,7 +143,7 @@ function clearingPrice(production, opts) {
   return 100;
 }
 
-const api = { TICKS_PER_SECOND, LEMON_BATCH, LEMON_REF_PRICE, MAX_LEMONS, AUTO_RATES, AUTO_COSTS, AUTO_MAX,
+const api = { TICKS_PER_SECOND, LEMON_BATCH, LEMON_REF_PRICE, MAX_LEMONS, AUTO_RATES, AUTO_MAX,
   demand, unitsPerSale, forecast, newState, tick, squeeze, autoRate, autoCost, buyAuto,
   adjustLemonPrice, lemonTrend, buyLemons, marketingCost, buyMarketing, setPrice, clearingPrice };
 if (typeof module !== "undefined") module.exports = api;
