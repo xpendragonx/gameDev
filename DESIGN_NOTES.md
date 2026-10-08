@@ -116,18 +116,24 @@ Cups come from lemons. This gives the player a second price to watch: the
 price they **pay** for lemons.
 
 - **Squeeze a Cup button:** 1 lemon becomes 1 cup in stock.
-- **Auto Squeezer:** costs money ($10), then squeezes 1 cup per second. It
+- **Auto Squeezer:** costs money ($5), then squeezes 1 cup per second. It
   stops when lemons run out or cup storage is full.
-- **5 upgrade levels:** each costs money and adds 0.2 cups/s.
+- **5 upgrade levels:** each costs money and adds 25% of the base rate.
+
+Scaled from the reference game: an AutoClipper costs $5 and makes 1 clip/s
+(`clipClick(clipperBoost * clipmakerLevel / 100)` every 10 ms), and the
+"Improved AutoClippers" projects add +25%, +50%, +75% to `clipperBoost`.
+The reference pays for those boosts in Operations, not cash, so the
+cash costs below are our own: each level is about 1.4x the last.
 
 | Level | Rate (cups/s) | Cost to reach |
 |---|---|---|
-| 1 (buy) | 1.0 | $10 |
-| 2 | 1.2 | $20 |
-| 3 | 1.4 | $40 |
-| 4 | 1.6 | $80 |
-| 5 | 1.8 | $160 |
-| 6 | 2.0 | $320 |
+| 1 (buy) | 1.00 | $5 |
+| 2 | 1.25 | $7 |
+| 3 | 1.50 | $10 |
+| 4 | 1.75 | $14 |
+| 5 | 2.00 | $20 |
+| 6 | 2.25 | $28 |
 
 **Variable lemon price.** The price to buy lemons moves, so there are
 *expensive times* and *cheap times* to buy. It copies the wire price in

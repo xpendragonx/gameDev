@@ -30,8 +30,10 @@ const MAX_LEMONS = 200;
 
 // Auto squeezer: level 1 is the purchase, levels 2-6 are the 5 upgrades.
 // AUTO_COSTS[i] is the price of going from level i to level i+1.
-const AUTO_RATES = [0, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0];   // cups per second
-const AUTO_COSTS = [10, 20, 40, 80, 160, 320];
+// Scaled from index_3.html: an AutoClipper costs $5 and makes 1 clip/s, and
+// the "Improved AutoClippers" projects add +25% each time.
+const AUTO_RATES = [0, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25];   // cups per second
+const AUTO_COSTS = [5, 7, 10, 14, 20, 28];
 const AUTO_MAX = AUTO_RATES.length - 1;
 
 const newState = () => ({

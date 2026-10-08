@@ -42,7 +42,7 @@ s = m.newState(); s.stock = s.maxStock; assert(!m.squeeze(s)); // needs room
 // Auto squeezer costs money, then makes ~1 cup/s using lemons.
 s = m.newState();
 assert(!m.buyAuto(s), 'cannot afford');
-s.cash = 10; assert(m.buyAuto(s)); assert.strictEqual(s.cash, 0); assert.strictEqual(s.autoLvl, 1);
+s.cash = m.AUTO_COSTS[0]; assert(m.buyAuto(s)); assert.strictEqual(s.cash, 0); assert.strictEqual(s.autoLvl, 1);
 s.price = 100;                                             // nobody buys, isolate production
 for (let i = 0; i < 100; i++) m.tick(s, () => 1);          // 10 s
 assert.strictEqual(s.stock, 10); assert.strictEqual(s.lemons, 10);
@@ -57,7 +57,7 @@ for (let i = 0; i < 5; i++) {
   assert(cost > 0 && m.buyAuto(s)); assert.strictEqual(before - s.cash, cost);
   assert(m.autoRate(s) > last); last = m.autoRate(s);
 }
-assert.strictEqual(m.autoCost(s), null); assert(!m.buyAuto(s)); assert.strictEqual(last, 2.0);
+assert.strictEqual(m.autoCost(s), null); assert(!m.buyAuto(s)); assert.strictEqual(last, 2.25);
 
 // Buying lemons costs the current price; price moves around and trends.
 s = m.newState(); s.cash = 1; s.lemonPrice = 0.10;
