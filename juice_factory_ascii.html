@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Apple Juice Factory ASCII</title>
+<style>
+  :root{--bg:#07100a;--panel:#0d1a12;--line:#1d3a29;--ink:#c8f5d4;--mute:#6f9d82;--accent:#ffcf5a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'DejaVu Sans Mono',Menlo,Consolas,'Liberation Mono',monospace}
+  header{display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center;justify-content:space-between;padding:12px 16px}
+  h1{margin:0;font-size:17px;letter-spacing:1px;color:var(--accent)}
+  .ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px;color:var(--mute)}
+  button{font:inherit;font-size:13px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:5px 11px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  input[type=range]{accent-color:var(--accent);vertical-align:middle}
+  label{display:inline-flex;gap:5px;align-items:center}
+  .wrap{padding:0 16px 24px;max-width:1500px;margin:0 auto}
+  #screen{background:#050c07;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:hidden;box-shadow:inset 0 0 40px rgba(0,0,0,.6)}
+  #scr{margin:0;line-height:1.18;white-space:pre;color:#c8f5d4;font-family:inherit}
+  #cap{margin-top:12px;padding:12px 16px;background:var(--panel);border:1px solid var(--line);border-radius:8px;min-height:80px}
+  #cap h2{margin:0 0 4px;font-size:15px;color:var(--accent)}
+  #cap p{margin:0;color:var(--mute);font-size:14px;line-height:1.5}
+  #dots{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+  #dots button{padding:3px 8px;font-size:12px}
+  #dots button.on{background:var(--accent);color:#1a1200;border-color:var(--accent);font-weight:700}
+  /* palette */
+  .t{color:#c8f5d4}.d{color:#3f6a52}.s{color:#7d9a8a}.h{color:#ffcf5a}.a{color:#ff5a4d}.ad{color:#9a3f38}
+  .g{color:#7ee05a}.w{color:#58b8ff}.wd{color:#2f6fa0}.j{color:#f0a030}.y{color:#ffe36e}.m{color:#b98a54}
+  .p{color:#c18cff}.r{color:#ff7a4a}.k{color:#e8e8e8}
+</style>
+</head>
+<body>
+<header>
+  <h1>🍎 APPLE JUICE FACTORY :: ASCII LINE</h1>
+  <div class="ctl">
+    <button id="prev">◀ Prev</button>
+    <button id="pp">⏸ Pause</button>
+    <button id="next">Next ▶</button>
+    <label>Speed <input id="spd" type="range" min="0.25" max="3" step="0.25" value="1"> <span id="spv">1×</span></label>
+    <label><input type="checkbox" id="auto" checked> Auto-advance</label>
+  </div>
+</header>
+<div class="wrap">
+  <div id="screen"><pre id="scr"></pre></div>
+  <section id="cap"><h2 id="capT"></h2><p id="capD"></p></section>
+  <nav id="dots"></nav>
+</div>
+
+<script>
+'use strict';
+const W = 100, H = 28;
+const ch = new Array(W * H), co = new Array(W * H);
+const scr = document.getElementById('scr');
+
+/* ---------- drawing primitives ---------- */
+function clear(){ ch.fill(' '); co.fill(''); }
+function put(x, y, s, c = 't'){
+  x = Math.floor(x); y = Math.floor(y);
+  if (y < 0 || y >= H) return;
+  for (let i = 0; i < s.length; i++){
+    const xx = x + i;
+    if (xx < 0 || xx >= W || s[i] === ' ') continue;
+    ch[y * W + xx] = s[i]; co[y * W + xx] = c;
+  }
+}
+function fill(x, y, w, h, c, col){ for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c, col); }
+function box(x, y, w, h, c = 's', dbl = false){
+  const [tl,tr,bl,br,hz,vt] = dbl ? '╔╗╚╝═║' : '┌┐└┘─│';
+  put(x, y, tl + hz.repeat(w - 2) + tr, c); put(x, y + h - 1, bl + hz.repeat(w - 2) + br, c);
+  for (let j = 1; j < h - 1; j++){ put(x, y + j, vt, c); put(x + w - 1, y + j, vt, c); }
+}
+function clearRect(x, y, w, h){ for (let j = 0; j < h; j++) for (let i = 0; i < w; i++){ const xx = x+i, yy = y+j; if (xx>=0&&xx<W&&yy>=0&&yy<H){ ch[yy*W+xx]=' '; co[yy*W+xx]=''; } } }
+function flow(x1, x2, T, sp, n){ const L = x2 - x1, o = []; for (let k = 0; k < n; k++) o.push([x1 + ((((T * sp + k * L / n) % L) + L) % L), k]); return o; }
+function belt(x1, x2, y, T, c = 's', dir = 1){
+  const sh = Math.floor(T * 6) * dir;
+  for (let x = x1; x <= x2; x++){
+    const m = (((x - sh) % 4) + 4) % 4;
+    put(x, y, m === 0 ? (dir > 0 ? '›' : '‹') : '═', c);
+    if (m === 2) put(x, y + 1, '·', 'd');
+  }
+  put(x1 - 1, y, '(', c); put(x2 + 1, y, ')', c);
+}
+function pipe(x1, x2, y, T, c = 'j', dir = 1){
+  const sh = Math.floor(T * 5) * dir;
+  for (let x = x1; x <= x2; x++){
+    put(x, y - 1, '─', 'd'); put(x, y + 1, '─', 'd');
+    const m = (((x - sh) % 4) + 4) % 4;
+    put(x, y, m === 0 ? '≈' : m === 2 ? '~' : '-', c);
+  }
+}
+function vpipe(x, y1, y2, T, c = 'j'){
+  const sh = Math.floor(T * 5);
+  for (let y = y1; y <= y2; y++){
+    put(x - 1, y, '│', 'd'); put(x + 1, y, '│', 'd');
+    put(x, y, (((y - sh) % 3) + 3) % 3 === 0 ? ':' : '·', c);
+  }
+}
+function wave(x, y, w, T, c, ph = 0){ let s = ''; for (let i = 0; i < w; i++) s += Math.sin(i * .7 + T * 3 + ph) > 0 ? '~' : '≈'; put(x, y, s, c); }
+function apple(x, y, k, T, clean = false){ put(x, y, 'Oo0o'[(Math.floor(T * 5) + k) % 4], clean ? (k % 4 === 0 ? 'g' : 'a') : (k % 4 === 0 ? 'g' : 'ad')); }
+function man(x, y, c = 'k'){ put(x, y, ' O ', c); put(x, y + 1, '/|\\', c); put(x, y + 2, '/ \\', c); }
+function blink(T, r = 3){ return Math.floor(T * r) % 2 === 0; }
+const hash = (a, b) => { const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return v - Math.floor(v); };
+
+/* ---------- scenes ---------- */
+const S = [];
+
+S.push({ title: 'Overview', desc: 'The whole line, harvest to shipping. An apple travels through 16 stages: receive, store, wash, grind, macerate, press, filter, pasteurize, ultrafilter, check, store, fill, label, ship.',
+ draw(T){
+  const names = ['Inspection','Silos','Stepped chute','Washing','Grinder','Maceration','Press','Filter + QC','Reservoir','Pasteurizer','Ultrafiltration','Final QC','Sterile storage','Drink boxes','Bottles','Label & ship'];
+  const act = Math.floor(T * .9) % 16;
+  names.forEach((n, i) => {
+    const row = Math.floor(i / 4), c0 = i % 4, col = row % 2 === 0 ? c0 : 3 - c0;
+    const x = 3 + col * 24, y = 2 + row * 6, on = i === act;
+    box(x, y, 21, 5, on ? 'h' : 'd', on);
+    put(x + 2, y + 1, String(i + 1).padStart(2, '0'), on ? 'h' : 's');
+    put(x + 2, y + 2, n, on ? 'h' : 't');
+    put(x + 2, y + 3, on ? (blink(T, 4) ? '  O' : '   O') : '', 'a');
+    const last = c0 === 3;
+    if (!last) put(row % 2 === 0 ? x + 21 : x - 3, y + 2, row % 2 === 0 ? ' ► ' : ' ◄ ', 's');
+    else if (row < 3) { put(x + 10, y + 5, 'v', 's'); }
+  });
+  put(3, 26, 'Macintosh apples · 90% of juice pressed in October · 20,000–40,000 tons / year', 'm');
+ }});
+
+S.push({ title: 'Reception & inspection', desc: 'Apples ride a conveyor to the inspection point. They tumble backwards against the belt, so wet leaves and unwanted material stick to the belt and are carried away.',
+ draw(T){
+  put(2, 8, ' ┌────────────┐', 's'); put(2, 9, ' │ OOOOOOOOOO │┐', 'a'); put(2, 10, ' │ OOOoOOOOOo ││', 'a'); put(2, 11, ' │OOOOOOOOOOOO│┘', 'a');
+  put(2, 12, ' └─(O)────(O)─┘', 's'); put(2, 13, '   TRUCK', 'd');
+  belt(18, 82, 13, T);
+  for (const [x, k] of flow(19, 80, T, 4.5, 9)) apple(x, 12, k, T);
+  for (const [x, k] of flow(19, 80, T, 6.5, 6)){ put(x, 12, k % 2 ? '&' : '~', 'g'); }
+  put(34, 10, '<<< apples tumble BACKWARD <<<', 'h'); put(34, 15, '>>> belt carries leaves >>>', 'g');
+  man(50, 5, 'k'); if (blink(T, 4)) { put(46, 8, '\\  ·  ·  /', 'y'); put(47, 9, '\\ · · /', 'y'); }
+  put(44, 4, 'INSPECTOR', 'h');
+  box(84, 14, 12, 5, 's'); put(86, 16, 'TRASH', 'd');
+  const f = Math.floor(T * 6) % 5; put(88, 14 + f * .6, '&', 'g');
+  put(4, 22, 'wet leaves + twigs adhere to the belt; apples roll on to the silos →', 'm');
+ }});
+
+S.push({ title: 'Silos', desc: 'The apples are stored in silos for several hours before juice-making begins.',
+ draw(T){
+  belt(2, 90, 2, T);
+  for (const [x, k] of flow(3, 88, T, 5, 12)) apple(x, 1, k, T);
+  [8, 34, 60].forEach((sx, si) => {
+    box(sx, 4, 20, 15, 's');
+    const lvl = Math.floor(6 + 3 * Math.sin(T * .4 + si * 2));
+    for (let y = 17; y > 17 - lvl; y--) for (let x = sx + 1; x < sx + 19; x++) if (hash(x, y + si) < .45) put(x, y, hash(x, y) < .2 ? 'o' : 'O', hash(x + 1, y) < .2 ? 'g' : 'a');
+    for (let k = 0; k < 3; k++){ const yy = 3 + ((T * 6 + k * 4 + si * 3) % 10); if (yy < 17 - lvl) put(sx + 10, yy, 'O', 'a'); }
+    put(sx + 5, 19, '\\' + '_'.repeat(8) + '/', 's');
+    put(sx + 22 - 3, 5 - (T * 2 + si) % 2, 'z', 'd'); put(sx + 18, 3, blink(T, 2) ? 'Z' : 'z', 'd');
+    put(sx + 6, 4, ` SILO ${si + 1} `, 'h');
+  });
+  belt(2, 90, 22, T);
+  for (const [x, k] of flow(3, 88, T, 4, 10)) apple(x, 21, k, T);
+  put(4, 25, 'apples rest here for several hours', 'm');
+ }});
+
+S.push({ title: 'Stepped chute', desc: 'A stepped chute slows the descent so the apples are not bruised on the way down.',
+ draw(T){
+  const N = 8;
+  for (let i = 0; i < N; i++){
+    const x = 6 + i * 11, y = 4 + i * 2;
+    put(x, y + 1, '▄'.repeat(10), 's'); put(x + 10, y + 1, '█', 's'); put(x + 10, y + 2, '▀', 's');
+    put(x + 3, y + 3, '┊', 'd');
+  }
+  for (let k = 0; k < 5; k++){
+    const u = (((T * .7 + k / 5) % 1) * N), s = Math.floor(u), f = u - s;
+    const x = 6 + s * 11 + f * 10, y = 4 + s * 2 - (f < .5 ? Math.sin(f * 2 * Math.PI) * 1.3 : 0);
+    put(x, y, 'O', k % 4 === 0 ? 'g' : 'a');
+    if (f < .5 && Math.sin(f * 2 * Math.PI) > .6) put(x, y + 1.3, '.', 'd');
+  }
+  put(40, 3, 'soft landings, no bruises', 'h');
+  put(40, 24, '≈ each step slows the fall ≈', 'm');
+ }});
+
+S.push({ title: 'Washing', desc: 'A first water bath eliminates pebbles (some apples were picked up off the ground). A shower of cool water completes the washing.',
+ draw(T){
+  box(4, 6, 46, 14, 'w');
+  for (let y = 9; y < 19; y++) put(5, y, '░'.repeat(44), 'wd');
+  wave(5, 8, 44, T, 'w'); wave(5, 9, 44, T, 'wd', 1);
+  for (let k = 0; k < 5; k++){ const y = 10 + ((T * 3 + k * 2.1) % 8); put(10 + k * 8, y, '.', 'k'); }
+  put(6, 18, '▪ ▪▪   ▪   ▪▪  ▪  ▪▪▪   ▪', 's'); put(14, 20, '[ pebble trap ]', 'd');
+  put(8, 4, 'WATER BATH — pebbles sink', 'w');
+  for (const [x, k] of flow(5, 48, T, 4, 5)){ put(x, 7 + (Math.sin(T * 3 + k) > 0 ? 0 : 0), 'Oo0o'[(Math.floor(T*4)+k)%4], k % 4 === 0 ? 'g' : 'ad'); }
+  put(54, 3, '╤══════════════════════════╤', 's');
+  for (let i = 0; i < 26; i += 2){ const y = 4 + ((T * 6 + i * .9) % 4); put(55 + i, y, '|', 'w'); }
+  put(54, 9, '', 's'); belt(52, 96, 9, T);
+  for (const [x, k] of flow(52, 94, T, 4, 6)) put(x, 8, 'Oo0o'[(Math.floor(T * 4) + k) % 4], k % 4 === 0 ? 'g' : 'a');
+  put(57, 2, 'COOL SHOWER', 'w');
+  put(54, 12, 'clean apples →', 'h');
+ }});
+
+S.push({ title: 'Grinder', desc: 'Apples are cut into little pieces, producing "gratings" (mash). Enzymes are added to break down the cell structure and allow maximum juice extraction.',
+ draw(T){
+  put(32, 3, '\\' + ' '.repeat(26) + '/', 's'); put(33, 4, '\\' + ' '.repeat(24) + '/', 's'); put(34, 5, '\\' + ' '.repeat(22) + '/', 's'); put(35, 6, '\\' + ' '.repeat(20) + '/', 's');
+  for (let k = 0; k < 7; k++){ const y = 0 + ((T * 6 + k * 1.7) % 8); put(37 + (k * 5) % 22, y, 'O', k % 3 === 0 ? 'g' : 'a'); }
+  box(34, 7, 28, 8, 's', true);
+  const fr = ['\\|/', '-+-', '/|\\', '-x-'][Math.floor(T * 10) % 4];
+  [40, 48, 56].forEach((bx, i) => { put(bx, 10, fr, 'k'); put(bx + 1, 9, '▲', 'd'); put(bx + 1, 11, '▼', 'd'); });
+  put(36, 8, 'BLADES', 'h');
+  // enzyme flask
+  put(70, 3, ' ___ ', 's'); put(70, 4, '|   |', 's'); put(70, 5, '/ ~ \\', 'p'); put(69, 6, '/_____\\', 's'); put(68, 7, 'ENZYMES', 'p');
+  put(72, 3, '', 's');
+  const d = (T * 5) % 6; put(66 - d * .6, 6 + d * .7, ':', 'p');
+  put(63, 6, '<', 'p');
+  // output mash
+  for (let k = 0; k < 6; k++){ const y = 15 + ((T * 6 + k * 1.3) % 6); put(42 + k * 3, y, '░▒▓'[k % 3], 'm'); }
+  put(34, 21, '▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄', 's');
+  put(36, 20, '░▒░▒▓░▒░▒▓░▒░▒▓░▒░▒▓░▒░▒▓░▒░▒', 'm');
+  put(36, 23, '"GRATINGS" (apple mash)', 'h');
+ }});
+
+S.push({ title: 'Maceration', desc: 'The gratings rest in maceration reservoirs for 60 to 90 minutes while the enzymes do their work (time-lapsed here).',
+ draw(T){
+  [6, 34, 62].forEach((tx, i) => {
+    box(tx, 3, 28, 15, 's', true);
+    const top = 8 + Math.sin(T * 2 + i) * .5;
+    wave(tx + 1, Math.floor(top), 26, T, 'm', i);
+    for (let y = Math.floor(top) + 1; y < 17; y++) put(tx + 1, y, '░▒'.repeat(13), 'm');
+    for (let k = 0; k < 4; k++){ const y = 16 - ((T * 2.5 + k * 1.4) % 8); if (y > top) put(tx + 4 + k * 6 + (i * 3) % 4, y, k % 2 ? 'o' : '°', 'y'); }
+    const clk = '|/─\\'[Math.floor(T * 3 + i) % 4];
+    put(tx + 9, 4, `( ${clk} )`, 'h'); put(tx + 6, 5, '60–90 min', 'h');
+    put(tx + 5, 19, `RESERVOIR ${i + 1}`, 'd');
+  });
+  pipe(2, 96, 22, T, 'm');
+  put(4, 25, 'enzymes break down cell walls →', 'p');
+ }});
+
+S.push({ title: 'Hydraulic press', desc: 'The gratings are pumped into a powerful hydraulic press. Filter sleeves hold back the skins, seeds and stems; only juice flows out.',
+ draw(T){
+  pipe(2, 30, 9, T, 'm');
+  box(30, 3, 40, 17, 's', true);
+  const py = 5 + Math.floor((Math.sin(T * 1.6) + 1) * 2.5);
+  put(49, 1, '║║', 's'); put(49, 2, '║║', 's'); put(49, 3, '║║', 's');
+  put(32, py, '▓'.repeat(36), 'k'); put(40, py - 1, 'HYDRAULIC', 'h');
+  for (let x = 34; x < 68; x += 6){ for (let y = 11; y < 17; y++) put(x, y, '║', 'm'); put(x + 1, 11, '▒', 'm'); put(x + 1, 16, '▒', 'm'); }
+  for (let y = py + 1; y < 11; y++) put(33, y, '░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒'.slice(0, 34), 'm');
+  put(33, 17, '≈ ≈ ≈ ≈ juice ≈ ≈ ≈ ≈', 'j');
+  for (let k = 0; k < 7; k++){ const y = 14 + ((T * 5 + k * 1.1) % 6); put(35 + k * 5, y, ':', 'j'); }
+  put(30, 21, '▀'.repeat(40), 's'); put(31, 22, 'JUICE TROUGH ► ► ►', 'j');
+  pipe(70, 96, 22, T, 'j');
+  box(76, 8, 20, 7, 'd'); put(78, 9, 'WASTE CAKE', 'd');
+  for (const [x, k] of flow(72, 90, T, 3, 4)) put(x, 11, '▒▓'[k % 2], 'm');
+  put(72, 11, '►', 'd'); put(78, 13, 'skins·seeds·stems', 'm');
+ }});
+
+S.push({ title: 'Filtering + quality control', desc: 'Quality control is strict at every stage: samples are drawn off to check the parameters. Then the juice is filtered a first time, and the smallest unwanted particles are held back by a sieve.',
+ draw(T){
+  pipe(2, 96, 9, T, 'j');
+  // sampling tap
+  put(16, 10, '┬', 's'); put(16, 11, '▼', 's'); const dr = (T * 4) % 4; put(16, 11 + dr, '·', 'j');
+  put(14, 15, '\\    /', 's'); put(14, 16, ' \\  / ', 's'); put(15, 17, '└──┘', 's');
+  const lv = 1 + Math.floor((T * 1.5) % 3); for (let i = 0; i < lv; i++) put(16, 16 - i + 1, '▒▒', 'j');
+  put(12, 19, 'sample vial', 'd');
+  man(26, 13, 'k'); put(30, 13, blink(T, 2) ? '[ OK ]' : '[ .. ]', 'g'); put(30, 15, 'QC LAB', 'h');
+  // sieve
+  for (let y = 5; y <= 13; y++) put(54, y, y % 2 ? '╫' : '╪', 'k');
+  put(52, 4, 'SIEVE', 'h');
+  for (const [x, k] of flow(36, 53, T, 3, 6)) put(x, 8 + (k % 3) - 1, k % 2 ? '*' : '·', 'm');
+  for (let k = 0; k < 4; k++) put(50 + k, 14 - (k % 2), '*', 'm');
+  for (const [x, k] of flow(56, 96, T, 5, 8)) put(x, 8 + ((k % 2) * 0), '.', 'y');
+  put(34, 4, 'cloudy', 'm'); put(70, 4, 'clearer', 'y');
+  put(30, 20, 'smallest particles held back →', 'm');
+ }});
+
+S.push({ title: 'Reservoirs', desc: 'Juice flows from one stage to the next through immense reservoirs.',
+ draw(T){
+  [6, 54].forEach((tx, i) => {
+    box(tx, 3, 38, 17, 's', true);
+    const top = 6 + Math.sin(T * .8 + i * 2) * 1.2;
+    wave(tx + 1, Math.floor(top), 36, T, 'j', i); wave(tx + 1, Math.floor(top) + 1, 36, T, 'j', i + 1.5);
+    for (let y = Math.floor(top) + 2; y < 19; y++) put(tx + 1, y, '▒'.repeat(36), 'j');
+    for (let k = 0; k < 5; k++){ const y = 18 - ((T * 2 + k * 2.2) % 11); if (y > top + 1) put(tx + 5 + k * 7, y, 'o', 'y'); }
+    put(tx + 10, 4, `RESERVOIR ${i + 1}`, 'h');
+  });
+  pipe(2, 6, 11, T, 'j'); pipe(44, 54, 11, T, 'j'); pipe(92, 98, 11, T, 'j');
+  pipe(2, 96, 23, T, 'j');
+  put(30, 25, 'juice on its way to pasteurization ►', 'h');
+ }});
+
+S.push({ title: 'Pasteurization', desc: 'The juice enters the heat exchanger at 22 °C and is heated to 88 °C, then cooled back down to 50 °C.',
+ draw(T){
+  const tempAt = x => x < 24 ? 22 : x < 50 ? 22 + (x - 24) / 26 * 66 : x < 76 ? 88 - (x - 50) / 26 * 38 : 50;
+  box(24, 3, 52, 11, 's', true);
+  for (let x = 25; x < 50; x++) for (let y = 4; y < 13; y++) if ((x % 3) === 0) put(x, y, '│', 'r'); else if (hash(x, y) < .15) put(x, y, '░', 'r');
+  for (let x = 50; x < 75; x++) for (let y = 4; y < 13; y++) if ((x % 3) === 0) put(x, y, '│', 'wd'); else if (hash(x, y) < .15) put(x, y, '░', 'wd');
+  put(32, 2, 'HEATING 🔥', 'r'); put(58, 2, 'COOLING ❄', 'w');
+  pipe(2, 97, 8, T, 'j');
+  for (let k = 0; k < 4; k++){ const f = (T * .8 + k / 4) % 1; put(30 + k * 6 + Math.sin(f * 6) * 1.5, 2 - f * 2 + 1, '~', 'k'); }
+  const px = 2 + ((T * 7) % 94), tp = Math.round(tempAt(px));
+  put(px, 7, 'O', 'y'); put(px - 2, 6, `${tp}°C`, tp > 70 ? 'r' : tp > 40 ? 'h' : 'w');
+  // profile chart
+  put(8, 15, 'TEMPERATURE PROFILE', 'h');
+  for (let x = 8; x < 92; x++){
+    const h = Math.round(tempAt(x + 6) / 88 * 8), cur = Math.abs(x + 6 - px) < 1.2;
+    for (let j = 0; j < h; j++) put(x, 24 - j, cur ? '█' : '▒', cur ? 'h' : tempAt(x + 6) > 60 ? 'r' : 'wd');
+  }
+  put(4, 24, '22', 'w'); put(48, 15, '88°C', 'r'); put(92, 24, '50', 'w');
+ }});
+
+S.push({ title: 'Ultrafiltration', desc: 'Enzymes hydrate the pectin to ease the second filtration. Membranes with microscopic pores retain the smallest particles; the juice is now perfectly clear.',
+ draw(T){
+  pipe(2, 33, 9, T, 'm'); pipe(67, 97, 9, T, 'y');
+  box(33, 4, 34, 11, 's', true);
+  for (let x = 38; x < 64; x += 3){ for (let y = 5; y < 14; y++) put(x, y, y % 2 ? '┃' : '┊', 'wd'); }
+  for (const [x, k] of flow(34, 48, T, 4, 6)){ put(x, 7 + (k % 3), '*', 'm'); }
+  for (const [x, k] of flow(34, 64, T, 6, 8)){ if (x > 46) put(x, 6 + (k % 4), '.', 'y'); }
+  for (let k = 0; k < 4; k++){ const y = 15 + ((T * 4 + k * 1.2) % 5); put(44 + k * 3, y, '*', 'm'); }
+  put(40, 18, '↓ retained particles', 'm'); put(36, 20, '[ waste ]', 'd');
+  put(70, 3, 'CLEAR JUICE ✦', 'y');
+  put(5, 3, 'cloudy', 'm');
+  put(4, 12, ' ___ ', 's'); put(4, 13, '|   |', 's'); put(3, 14, '/ ~ ~ \\', 'p'); put(2, 15, 'ENZYMES', 'p'); const d = (T * 5) % 3; put(6, 10 - d * .3, '', 'p'); put(6, 11, blink(T, 4) ? ':' : ' ', 'p');
+  put(36, 2, 'MEMBRANES (microscopic pores)', 'h');
+  put(40, 24, '⊙ zoom  ·  * = BLOCKED   . = passes', 'd');
+ }});
+
+S.push({ title: 'Final quality check', desc: 'The clarity of the juice is verified, along with its flavor, color and natural fruit-sugar content.',
+ draw(T){
+  put(6, 5, '  ___  ', 'k'); put(5, 6, ' |▒▒▒| ', 'j'); put(5, 7, ' |▒▒▒| ', 'j'); put(5, 8, '  \\▒/  ', 'j'); put(6, 9, '  |_|', 'k'); put(5, 11, 'sample', 'd');
+  box(22, 3, 70, 19, 's', true); put(26, 4, 'FINAL QC PANEL', 'h');
+  const rows = [['CLARITY', 1], ['FLAVOR', .95], ['COLOR', 1], ['NAT. SUGAR', .72]];
+  const ph = (T % 12);
+  rows.forEach(([n, v], i) => {
+    const p = Math.max(0, Math.min(1, (ph - i * 1.5) / 2)), len = Math.floor(40 * v * p);
+    put(26, 8 + i * 3, n.padEnd(11), 't');
+    put(38, 8 + i * 3, '[' + '▒'.repeat(40) + ']', 'd'); put(39, 8 + i * 3, '█'.repeat(len), 'g');
+    put(80, 8 + i * 3, p >= 1 ? 'OK ✓' : '... ', p >= 1 ? 'g' : 'd');
+  });
+  if (ph > 8) put(40, 19, blink(T, 3) ? '>>> APPROVED FOR STORAGE <<<' : '', 'h');
+ }});
+
+S.push({ title: 'Sterile storage', desc: 'Pressing happens in October, so juice is kept in sterile tanks (110,000 L each) to be bottled through the year. No preserving agent is added.',
+ draw(T){
+  [4, 28, 52, 76].forEach((tx, i) => {
+    put(tx + 2, 3, '.' + '─'.repeat(14) + '.', 's'); box(tx, 4, 20, 14, 's', true);
+    const top = 7 + (i % 2) + Math.sin(T * .6 + i) * .6;
+    wave(tx + 1, Math.floor(top), 18, T, 'y', i);
+    for (let y = Math.floor(top) + 1; y < 17; y++) put(tx + 1, y, '▓'.repeat(18), 'y');
+    put(tx + 5, 5, '110,000 L', 'h');
+  });
+  pipe(2, 97, 21, T, 'y');
+  put(28, 24, blink(T, 1.5) ? '[ X ] NO PRESERVING AGENT ADDED' : '[ . ] NO PRESERVING AGENT ADDED', 'h');
+  put(4, 1, 'STERILE WAREHOUSE', 'd');
+ }});
+
+S.push({ title: 'Drink-box line · 100 per minute', desc: 'Small drinking containers are filled at a rate of 100 a minute and hermetically sealed. Two small sprays of hot glue secure the straw to the side of each box.',
+ draw(T){
+  belt(2, 96, 14, T);
+  // filler
+  put(22, 6, '┌──┐', 's'); put(22, 7, '│▒▒│', 'j'); put(23, 8, '╥', 's'); put(23, 9, blink(T, 6) ? ':' : '.', 'j'); put(18, 4, 'FILLER', 'h');
+  // sealer
+  const sy = 7 + Math.floor((Math.sin(T * 3) + 1) * 1.5); put(47, sy, '╔══╗', 'k'); put(48, sy - 1, '║║', 's'); put(46, 4, 'SEALER', 'h');
+  // glue
+  put(68, 6, '┌────────┐', 's'); put(68, 4, 'GLUE + STRAW', 'h');
+  [70, 74].forEach(gx => { put(gx, 7, '╥', 's'); if (blink(T, 5)) { put(gx - 1, 8, '/', 'r'); put(gx, 9, '\\', 'r'); put(gx + 1, 10, '/', 'r'); } });
+  for (const [x, k] of flow(4, 92, T, 6, 9)){
+    const st = x < 24 ? 0 : x < 48 ? 1 : x < 72 ? 2 : 3;
+    put(x, 12, '┌──┐', st === 2 || st === 3 ? 'k' : 'd'); put(x, 13, st === 0 ? '│  │' : '│▒▒│', st === 0 ? 'd' : 'j');
+    if (st >= 2) put(x, 12, '┌▓▓┐', 'k');
+    if (st === 3){ put(x + 4, 11, '/', 'a'); put(x + 5, 10, '_', 'a'); }
+  }
+  put(4, 19, 'empty', 'd'); put(26, 19, 'filled', 'j'); put(50, 19, 'sealed', 'k'); put(74, 19, 'straw glued', 'a');
+  put(40, 23, '▶ 100 boxes / minute ◀', 'h');
+ }});
+
+S.push({ title: 'Bottle line · 120 per minute', desc: 'In a white sterile room, bottles are washed and disinfected with hydrogen peroxide, rinsed with sterile water, filled with pasteurized juice and capped at 120 bottles a minute.',
+ draw(T){
+  box(2, 3, 96, 21, 'd'); put(4, 3, ' WHITE STERILE ROOM ', 'k');
+  belt(3, 95, 18, T);
+  // wash
+  [14, 20, 26, 32].forEach(nx => { put(nx, 6, '╥', 's'); for (let k = 0; k < 3; k++) put(nx + (k - 1) * (hash(nx, k) > .5 ? 1 : -1), 7 + ((T * 6 + k * 2 + nx) % 8), ':', 'p'); });
+  put(12, 4, 'H₂O₂ DISINFECT', 'p');
+  // rinse
+  [44, 50, 56].forEach(nx => { put(nx, 6, '╥', 's'); for (let k = 0; k < 3; k++) put(nx + k - 1, 7 + ((T * 6 + k * 2 + nx) % 8), '.', 'w'); });
+  put(42, 4, 'STERILE RINSE', 'w');
+  // fill
+  put(67, 6, '┌┐', 's'); put(67, 7, '││', 'j'); put(67, 8, '╥╥', 's'); put(68, 9, blink(T, 6) ? ':' : '.', 'j'); put(64, 4, 'FILL', 'j');
+  // cap
+  const cy = 8 + Math.floor((Math.sin(T * 3) + 1) * 1.5); put(80, cy, '[▄▄]', 'a'); put(81, cy - 1, '║║', 's'); put(78, 4, 'CAP', 'a');
+  for (const [x, k] of flow(4, 92, T, 6, 10)){
+    const st = x < 36 ? 0 : x < 62 ? 1 : x < 76 ? 2 : 3;
+    const c = st === 0 ? 'd' : st === 1 ? 'w' : 'k';
+    put(x, 16, ' ┬ ', c); put(x, 17, st >= 2 ? '│▒│' : '│ │', st >= 2 ? 'j' : c);
+    if (st === 3) put(x, 16, '▄┬▄', 'a');
+  }
+  put(40, 22, '▶ 120 bottles / minute ◀', 'h');
+ }});
+
+S.push({ title: 'Labeling & shipping', desc: 'Bottles are labeled and sent to shipping. Between 20,000 and 40,000 tons of apples become juice each year, and thanks to perfect preservation, consumers can enjoy it at any time of the year.',
+ draw(T){
+  belt(2, 66, 14, T);
+  const cx = 28, rot = '|/─\\'[Math.floor(T * 5) % 4];
+  put(cx - 2, 8, ' ____ ', 's'); put(cx - 2, 9, `( ${rot}${rot} )`, 'k'); put(cx - 1, 10, '└┬┬┘', 's'); put(cx, 11, '▒▒', 'k'); put(cx - 3, 6, 'LABELER', 'h');
+  for (const [x, k] of flow(4, 64, T, 6, 8)){
+    put(x, 12, ' ┬ ', 'k'); put(x, 13, '│▒│', 'j'); put(x, 12, '▄┬▄', 'a');
+    if (x > cx + 2) put(x + 1, 13, '▒', 'k');
+  }
+  // truck
+  box(70, 7, 22, 11, 'k'); box(92, 11, 6, 7, 'k'); put(93, 12, '▒▒', 'w');
+  put(72, 18, '(O)', 'k'); put(76, 18, '', 'k'); put(84, 18, '(O)', 'k'); put(94, 18, '(O)', 'k');
+  put(74, 8, 'SHIPPING', 'h');
+  const n = Math.floor(T * 1.7); put(73, 11, `bottles: ${n}`, 't'); put(73, 13, `pallets: ${Math.floor(n / 24)}`, 't');
+  for (let k = 0; k < 2; k++){ const x = 62 + ((T * 6 + k * 3) % 10); if (x < 70) put(x, 13, '│▒│', 'j'); }
+  put(8, 22, '20,000 – 40,000 tons of apples → juice, every year', 'm');
+  if (blink(T, 1.2)) put(26, 25, '★ ENJOY ANY TIME OF YEAR ★', 'h');
+ }});
+
+/* ---------- rendering ---------- */
+const esc = c => c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '&' ? '&amp;' : c;
+function render(){
+  const out = [];
+  for (let y = 0; y < H; y++){
+    let line = '', cur = null, buf = '';
+    for (let x = 0; x < W; x++){
+      const c = co[y * W + x] || 't';
+      if (c !== cur){ if (buf) line += `<span class="${cur}">${buf}</span>`; cur = c; buf = ''; }
+      buf += esc(ch[y * W + x]);
+    }
+    line += `<span class="${cur}">${buf}</span>`;
+    out.push(line);
+  }
+  scr.innerHTML = out.join('\n');
+}
+function fit(){
+  const wpx = document.getElementById('screen').clientWidth - 20;
+  const fs = Math.max(6, Math.min(24, wpx / (W * 0.602)));
+  scr.style.fontSize = fs + 'px';
+}
+window.addEventListener('resize', fit);
+
+/* ---------- control ---------- */
+const capT = document.getElementById('capT'), capD = document.getElementById('capD'), dots = document.getElementById('dots');
+let cur = 0, T = 0, sceneT = 0, speed = 1, paused = false;
+const SCENE_LEN = 14;
+S.forEach((s, i) => {
+  const b = document.createElement('button');
+  b.textContent = i === 0 ? 'Overview' : `${i} ${s.title.split(' ·')[0]}`;
+  b.onclick = () => go(i);
+  dots.appendChild(b);
+});
+function go(i){
+  cur = (i + S.length) % S.length; sceneT = 0;
+  capT.textContent = cur === 0 ? S[0].title : `${cur} / ${S.length - 1}  ${S[cur].title}`;
+  capD.textContent = S[cur].desc;
+  [...dots.children].forEach((b, k) => b.classList.toggle('on', k === cur));
+}
+document.getElementById('prev').onclick = () => go(cur - 1);
+document.getElementById('next').onclick = () => go(cur + 1);
+document.getElementById('pp').onclick = e => { paused = !paused; e.target.textContent = paused ? '▶ Play' : '⏸ Pause'; };
+document.getElementById('spd').oninput = e => { speed = +e.target.value; document.getElementById('spv').textContent = speed + '×'; };
+document.addEventListener('keydown', e => { if (e.key === 'ArrowRight') go(cur + 1); if (e.key === 'ArrowLeft') go(cur - 1); if (e.key === ' '){ e.preventDefault(); document.getElementById('pp').click(); } });
+
+let last = performance.now(), acc = 0;
+function frame(now){
+  const dt = Math.min(.1, (now - last) / 1000); last = now;
+  if (!paused){ T += dt * speed; sceneT += dt * speed; }
+  acc += dt;
+  if (acc >= 1 / 14){
+    acc = 0;
+    clear();
+    box(0, 0, W, H, 'd');
+    S[cur].draw(T);
+    put(2, 0, ` ${cur === 0 ? 'OVERVIEW' : cur + '/' + (S.length - 1) + ' · ' + S[cur].title.toUpperCase()} `, 'h');
+    render();
+  }
+  if (document.getElementById('auto').checked && !paused && sceneT > SCENE_LEN) go(cur + 1);
+  requestAnimationFrame(frame);
+}
+const h = parseInt(location.hash.slice(1), 10);
+go(Number.isFinite(h) ? h : 0); fit();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
