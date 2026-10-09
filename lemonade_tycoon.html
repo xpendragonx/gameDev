@@ -17,7 +17,8 @@
   .wrap{padding:0 16px 24px;max-width:1500px;margin:0 auto}
   #tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
   #tabs button.on{background:var(--accent);color:#1a1200;border-color:var(--accent);font-weight:700}
-  #tabs button.new{border-color:var(--accent);color:var(--accent)}
+  #tabs button.new{border-color:var(--accent);color:var(--accent);animation:flash .9s steps(1,end) infinite}
+  @keyframes flash{50%{background:var(--accent);color:#1a1200}}
   #screen{background:#070b04;border:1px solid var(--line);border-radius:8px;padding:10px;text-align:center;overflow:hidden;box-shadow:inset 0 0 40px rgba(0,0,0,.6)}
   #scr{display:inline-block;margin:0;text-align:left;line-height:1.18;white-space:pre;font-family:inherit;cursor:crosshair;user-select:none;-webkit-user-select:none;touch-action:manipulation}
   #msg{margin-top:10px;min-height:22px;color:var(--accent);font-size:14px}
@@ -45,7 +46,7 @@
   <div id="tabs"></div>
   <div id="screen"><pre id="scr"></pre></div>
   <div id="msg"></div>
-  <div id="shopWrap"><h3 class="sec" id="shopT">UPGRADES</h3><div id="shop"></div></div>
+  <div id="shopWrap" style="display:none"><h3 class="sec" id="shopT">UPGRADES</h3><div id="shop"></div></div>
   <p id="ovHint"><small>Click a machine to upgrade it (or to open its job if you haven't learned it yet). Nothing tells you where the problem is: watch where the lemons pile up, and where they fall off the belt. Reach 100% efficiency and hold it to win.</small></p>
   <p><small>Learn each job by hand. Mastery lets you buy its machine (Lv 1), which also unlocks the next job. Higher levels make that stage faster, but the whole line only runs as fast as its slowest stage: check the Overview tab for bottlenecks.</small></p>
 </div>
@@ -101,6 +102,7 @@ const STAGES = [
       { kind: 'small', name: 'Better reagents',       rate: 3.9, cost: 1700, count: 3 },
       { kind: 'small', name: 'Robotic sampler',       rate: 4.4, cost: 2100, count: 3 } ] } },
 ];
+const PER_LEVEL_MASTERY = { inspect: true };   // stages where EVERY upgrade needs the minigame mastered again (the stage tab only; the factory floor upgrades freely)
 const PLANNED = [];      // names of stages not built yet (shown locked); empty = the whole line exists
 
 /* ---------- ASCII engine ---------- */
@@ -186,6 +188,7 @@ const cumValue = i => STAGES.slice(0, i + 1).reduce((a, s) => a + s.value, 0);
 const plainName = t => t.replace(/^\S+\s/, '');
 STAGES.forEach(s => { if ((G.lvl[s.id] || 0) > maxLvl(s.id)) G.lvl[s.id] = maxLvl(s.id); });
 G.lost = G.lost || 0; G.won = !!G.won;
+const floorOpen = () => STAGES.every(s => lvl(s.id) > 0);   // the factory floor opens once every stage is automated
 let T = 0, view = 'overview', pops = [], msgT = 0;
 function pop(x, y, text, col){ pops.push({ x, y, text, col, t: 0 }); }
 function say(s){ document.getElementById('msg').textContent = s; msgT = 7; }
@@ -258,8 +261,10 @@ function inspExit(l){
   if (!mastered('inspect')) addMastery('inspect', -3);
   pop(X1 - 2, Y - 1, '-2', 'r');
 }
+const inspPlaying = () => !automated('inspect') || (PER_LEVEL_MASTERY.inspect && !mastered('inspect') && lvl('inspect') < maxLvl('inspect'));
+const inspSpeed = () => 5 + 0.6 * Math.max(0, lvl('inspect') - 1), inspEvery = () => 1 / (1 + 0.1 * Math.max(0, lvl('inspect') - 1));   // the minigame gets harder with each level
 function inspClick(cx, cy){
-  if (automated('inspect')) return;                       // the machine does the job now
+  if (!inspPlaying()) return;                             // the machine does the job now
   let best = null, bd = 1e9;
   for (const l of I.lemons){
     const dx = Math.abs(l.x - cx), dy = Math.abs(Y - cy);
@@ -276,30 +281,30 @@ function inspClick(cx, cy){
   }
 }
 function inspStep(dt){                                   // visuals + manual mechanic; only runs while viewed
-  const auto = automated('inspect');
+  const playing = inspPlaying(), auto = automated('inspect') && !playing;
   I.spawnT -= dt;
-  if (I.spawnT <= 0){ inspSpawn(); I.spawnT = (auto ? Math.max(.35, 1 / rateOf('inspect')) : 1.0) * (.85 + Math.random() * .3); }
+  if (I.spawnT <= 0){ inspSpawn(); I.spawnT = (playing ? inspEvery() : Math.max(.35, 1 / rateOf('inspect'))) * (.85 + Math.random() * .3); }
   for (const l of I.lemons){
-    l.x += 5 * dt;
+    l.x += (playing ? inspSpeed() : 5) * dt;
     if (auto && !l.scanned && l.x >= SCAN){ l.scanned = true; I.zap = .3; if (l.bad) l.dead = true; }
-    if (!l.dead && l.x > X1){ l.dead = true; if (!auto) inspExit(l); }
+    if (!l.dead && l.x > X1){ l.dead = true; if (playing) inspExit(l); }
   }
   I.lemons = I.lemons.filter(l => !l.dead);
   I.zap = Math.max(0, I.zap - dt);
 }
 function inspDraw(){
-  const auto = automated('inspect');
+  const auto = automated('inspect'), playing = inspPlaying();
   put(19, 2, 'SORTED', 'd'); put(26, 2, String(G.sorted).padEnd(6), 't');
   put(34, 2, 'COMBO', 'd'); put(40, 2, String(I.combo).padEnd(4), I.combo >= 5 ? 'h' : 't'); put(45, 2, `(best ${G.best})`, 'd');
   put(2, 8, ' ┌────────────┐', 's'); put(2, 9, ' │ OOOOOOOOOO │┐', 'a'); put(2, 10, ' │ OOOoOOOOOo ││', 'a'); put(2, 11, ' │OOOOOOOOOOOO│┘', 'a');
   put(2, 12, ' └─(O)────(O)─┘', 's'); put(3, 13, 'TRUCK', 'd');
-  belt(X0 - 1, X1 + 1, 13, T, 5);
+  belt(X0 - 1, X1 + 1, 13, T, playing ? inspSpeed() : 5);
   box(84, 14, 12, 5, 's'); put(86, 16, 'TRASH', 'd');
   man(30, 5, 'k'); put(26, 4, 'INSPECTOR', 'h');
-  if (!auto && blink(T, 3)) put(27, 8, '\\ · · /', 'y');
+  if (playing && blink(T, 3)) put(27, 8, '\\ · · /', 'y');
   if (auto){
     box(SCAN - 8, 3, 17, 6, 'h', true); put(SCAN - 6, 4, 'AUTO-INSPECT', 'h');
-    put(SCAN - 4, 5, blink(T, 4) ? '[ ▓▒░ ]' : '[ ░▒▓ ]', 'g'); put(SCAN - 6, 7, `Lv ${lvl('inspect')}  ${rateOf('inspect').toFixed(2)}/s`, 'd');
+    put(SCAN - 4, 5, blink(T, 4) ? '[ ▓▒░ ]' : '[ ░▒▓ ]', 'g'); put(SCAN - 6, 7, playing ? 'paused (your turn)' : `Lv ${lvl('inspect')}`, 'd');
     put(SCAN, 9, '║', 's'); put(SCAN, 10, '║', 's');
     if (I.zap > 0){ put(SCAN - 2, 11, '\\ | /', 'y'); put(SCAN - 2, 12, ' ─┼─ ', 'y'); } else put(SCAN, 11, '▼', 'y');
   }
@@ -310,9 +315,12 @@ function inspDraw(){
   put(3, 16, 'BAD:', 'd'); put(8, 16, '@ mold', 'mold'); put(16, 16, '% rot', 'rot'); put(23, 16, '& leaf', 'g'); put(31, 16, '# twig', 'twig');
   put(41, 16, 'GOOD:', 'd'); put(47, 16, 'O', 'a');
   drawMastery('inspect', 18);
-  if (auto) put(3, 20, 'Machine running — raise its level to speed this stage up.', 'g');
-  else if (!mastered('inspect')){ if (blink(T, 2)) put(3, 20, '>>> CLICK THE BAD LEMONS BEFORE THEY REACH THE END <<<', 'h'); }
-  else put(3, 20, 'Mastered! Buy the Auto-Inspector below.', 'g');
+  if (!playing && automated('inspect')) put(3, 20, 'Machine running — raise its level to speed this stage up.', 'g');
+  else if (!mastered('inspect')){
+    if (blink(T, 2)) put(3, 20, '>>> CLICK THE BAD LEMONS BEFORE THEY REACH THE END <<<', 'h');
+    if (automated('inspect')) put(3, 19, `LEVEL ${lvl('inspect')} BELT — master it again to unlock the next upgrade`, 'g');
+  }
+  else put(3, 20, 'Mastered! Install the Auto-Inspector below.', 'g');
 }
 
 /* ======================================================================
@@ -389,11 +397,12 @@ function grDraw(){
 /* ======================================================================
    STAGE 3 — MACERATION  (load a tank, wait, collect before it spoils)
    ====================================================================== */
-const MC = { tanks: [0, 1, 2].map(() => ({ st: 'empty', t: 0 })) }, MC_X = [6, 38, 70], MC_BREW = 6, MC_WIN = 3;
+const MC = { tanks: [0, 1, 2].map(() => ({ st: 'empty', t: 0 })) }, MC_BREW = 6, MC_WIN = 3;
+const mcLayout = () => { const w = 10 + 4 * lvl('macerate'), gap = 4, x0 = Math.floor((W - (3 * w + 2 * gap)) / 2); return { w, xs: [0, 1, 2].map(i => x0 + i * (w + gap)) }; };   // tanks start small and grow with each upgrade
 function mcClick(cx, cy){
   if (automated('macerate')) return;
-  const i = MC_X.findIndex(x => cx >= x && cx <= x + 24); if (i < 0 || cy < 3 || cy > 17) return;
-  const k = MC.tanks[i], px = MC_X[i] + 12;
+  const { w, xs } = mcLayout(), i = xs.findIndex(x => cx >= x && cx <= x + w); if (i < 0 || cy < 4 || cy > 18) return;
+  const k = MC.tanks[i], px = xs[i] + Math.floor(w / 2);
   if (k.st === 'empty'){ k.st = 'brew'; k.t = 0; pop(px, 14, 'loaded', 's'); }
   else if (k.st === 'brew') pop(px, 14, 'not ready', 'd');
   else if (k.st === 'ready'){
@@ -411,27 +420,29 @@ function mcStep(dt){
   }
 }
 function mcDraw(){
-  const auto = automated('macerate');
+  const auto = automated('macerate'), { w, xs } = mcLayout(), narrow = w < 18;
   put(19, 2, 'BATCHES', 'd'); put(27, 2, String(G.n.mac || 0).padEnd(6), 't');
-  MC_X.forEach((tx, i) => {
+  put(40, 2, 'TANK SIZE', 'd'); put(50, 2, '■'.repeat(lvl('macerate') + 1) + '□'.repeat(Math.max(0, maxLvl('macerate') - lvl('macerate'))), 'h');
+  xs.forEach((tx, i) => {
     const k = MC.tanks[i];
     let f, label, lc, col = 'm';
-    if (auto){ const pr = ((T * rateOf('macerate') / .9 / MC_BREW) + i / 3) % 1; f = pr; label = pr > .85 ? 'READY → auto-collected' : `BREWING ${Math.floor(pr * 100)}%`; lc = pr > .85 ? 'g' : 's'; }
-    else if (k.st === 'empty'){ f = 0; label = 'EMPTY — click to load'; lc = 'd'; }
-    else if (k.st === 'brew'){ f = k.t / MC_BREW; label = `BREWING ${Math.floor(f * 100)}%`; lc = 's'; }
-    else if (k.st === 'ready'){ f = 1; label = blink(T, 4) ? '★ READY — CLICK! ★' : '  READY — CLICK!  '; lc = 'h'; }
-    else { f = 1; label = 'SPOILED — click to clear'; lc = 'r'; col = 'rot'; }
-    box(tx, 3, 24, 13, k.st === 'ready' && !auto ? 'h' : k.st === 'spoiled' && !auto ? 'r' : 's', true);
-    put(tx + 2, 3, ` TANK ${i + 1} `, 'h');
-    const rows = Math.round(f * 10);
-    for (let r = 0; r < rows; r++) put(tx + 1, 14 - r, (r === rows - 1 ? '≈~' : '░▒').repeat(11), col);
-    if (f > 0 && f < 1 || auto) for (let b = 0; b < 3; b++) put(tx + 4 + b * 7, 14 - ((T * 2 + b * 1.7 + i) % 9), b % 2 ? 'o' : '°', 'y');
-    put(tx + 9, 4, `( ${'|/─\\'[Math.floor(T * 3 + i) % 4]} )`, 'h');
-    put(tx + 1, 16, label.slice(0, 23), lc);
+    if (auto){ const pr = ((T * rateOf('macerate') / .9 / MC_BREW) + i / 3) % 1; f = pr; label = pr > .85 ? (narrow ? 'READY' : 'READY → auto-collected') : `BREWING ${Math.floor(pr * 100)}%`; lc = pr > .85 ? 'g' : 's'; }
+    else if (k.st === 'empty'){ f = 0; label = narrow ? 'EMPTY' : 'EMPTY — click to load'; lc = 'd'; }
+    else if (k.st === 'brew'){ f = k.t / MC_BREW; label = narrow ? `${Math.floor(f * 100)}%` : `BREWING ${Math.floor(f * 100)}%`; lc = 's'; }
+    else if (k.st === 'ready'){ f = 1; label = narrow ? (blink(T, 4) ? '★READY★' : ' READY ') : (blink(T, 4) ? '★ READY — CLICK! ★' : '  READY — CLICK!  '); lc = 'h'; }
+    else { f = 1; label = narrow ? 'SPOILED' : 'SPOILED — click to clear'; lc = 'r'; col = 'rot'; }
+    box(tx, 4, w, 13, k.st === 'ready' && !auto ? 'h' : k.st === 'spoiled' && !auto ? 'r' : 's', true);
+    put(tx + 1, 4, ` TANK ${i + 1} `.slice(0, w - 2), 'h');
+    const rows = Math.round(f * 10), iw = w - 2;
+    for (let r = 0; r < rows; r++) put(tx + 1, 15 - r, (r === rows - 1 ? '≈~' : '░▒').repeat(Math.ceil(iw / 2)).slice(0, iw), col);
+    if (f > 0 && f < 1 || auto) for (let b = 0; b < 3; b++) put(tx + 2 + b * Math.max(2, Math.floor((iw - 3) / 3)), 15 - ((T * 2 + b * 1.7 + i) % 9), b % 2 ? 'o' : '°', 'y');
+    put(tx + Math.floor(w / 2) - 2, 5, `( ${'|/─\\'[Math.floor(T * 3 + i) % 4]} )`, 'h');
+    put(tx + 1, 17, label.slice(0, w - 1), lc);
   });
-  if (auto) put(3, 20, `Tanks cycling automatically — Lv ${lvl('macerate')}: ${rateOf('macerate').toFixed(2)} units/s.`, 'g');
+  put(3, 19, 'click a tank:  load it → wait → collect it before it spoils', 'd');
+  if (auto) put(3, 20, `Tanks cycling automatically — level ${lvl('macerate')}.`, 'g');
   else if (!mastered('macerate')){ if (blink(T, 2)) put(3, 20, ">>> LOAD A TANK · CLICK AGAIN WHEN READY · DON'T LET IT SPOIL <<<", 'h'); }
-  else put(3, 20, 'Mastered! Buy the extra tanks below.', 'g');
+  else put(3, 20, 'Mastered! Install the first vat below.', 'g');
   drawMastery('macerate', 22);
 }
 
@@ -670,7 +681,7 @@ function ovHit(cx, cy){
 }
 function ovClick(cx, cy){
   const i = ovHit(cx, cy); if (i < 0 || !G.unlocked[STAGES[i].id]) return;
-  if (!automated(STAGES[i].id)) setView(STAGES[i].id); else buy(STAGES[i].id);
+  if (!automated(STAGES[i].id)) setView(STAGES[i].id); else buy(STAGES[i].id, true);
 }
 
 /* ---------- stage registry (step runs only while the stage is on screen) ---------- */
@@ -696,19 +707,33 @@ function draw(){
   MODS[view].draw();
   if (view !== 'overview'){
     for (const p of pops) put(p.x - 1, (MODS[view].popY || (view === 'inspect' ? Y : 16)) - 1 - p.t * 2.5, p.text, p.col);
-    const all = STAGES.map(x => x.name).concat(PLANNED);
-    all.forEach((n, i) => {
-      const x = 3 + i * 16, st = STAGES[i];
-      let line2, c;
-      if (!st || !G.unlocked[st.id]){ line2 = '(locked)'; c = 'd'; }
-      else if (automated(st.id)){ line2 = `AUTO Lv ${lvl(st.id)}`; c = 'g'; }
-      else { line2 = 'ACTIVE'; c = 'h'; }
-      put(x, 24, `[${i + 1}] ${n}`, st && st.id === view ? 'h' : c); put(x, 25, line2, c);
-      if (i < 5) put(x + 13, 24, '►', 'd');
-    });
-    const nxt = STAGES[si + 1];
-    put(3, 26, automated(view) ? (nxt ? 'Next stage unlocked.' : 'More stages coming soon.') : (nxt ? `Automate ${stageOf(view).title} to unlock ${nxt.title}.` : 'Automate this stage to complete the line so far.'), 'd');
+    upgradePanel();
   }
+}
+
+/* ---------- upgrade panel (drawn inside the main screen; click the BUY button) ---------- */
+const BUY_RECT = { x1: 72, x2: 97, y1: 23, y2: 26 };
+function buyState(id, viaFloor = false){
+  const l = lvl(id);
+  if (l >= maxLvl(id)) return { ok: false, why: 'MAXED OUT' };
+  if (l === 0 && !mastered(id)) return { ok: false, why: 'master it first' };
+  if (l >= 1 && PER_LEVEL_MASTERY[id] && !viaFloor && !mastered(id)) return { ok: false, why: 'master it again' };
+  const cost = lvlData(id, l + 1).cost;
+  if (G.coins < cost) return { ok: false, why: `need ${Math.ceil(cost - G.coins)}¢ more`, cost };
+  return { ok: true, cost };
+}
+function upgradePanel(){
+  const s = stageOf(view), l = lvl(s.id), n = maxLvl(s.id), nx = l < n ? lvlData(s.id, l + 1) : null, cur = l > 0 ? lvlData(s.id, l) : null, st = buyState(s.id);
+  box(2, 23, 96, 4, 'h'); put(4, 23, ' UPGRADE ', 'h');
+  put(4, 24, plainName(s.upgrade.title), 't');
+  s.upgrade.levels.forEach((lv_, k) => put(26 + k, 24, k < l ? (lv_.kind === 'big' ? '◆' : '●') : (lv_.kind === 'big' ? '◇' : '○'), k < l ? 'h' : 'd'));
+  put(36, 24, `Lv ${l}/${n}`, 's');
+  const pct = nx && cur ? Math.round((nx.rate / cur.rate - 1) * 100) : 0;
+  put(4, 25, !nx ? 'Fully upgraded.' : l === 0 ? `${nx.name}: automates ${s.title} and unlocks the next process.` : `Next: ${nx.name} (${nx.kind === 'big' ? 'big upgrade' : 'small upgrade'}, about +${pct}% speed)`, 'd');
+  if (nx){
+    put(74, 24, st.ok ? `▶ BUY  ${st.cost}¢ ◀` : `  BUY  ${nx.cost}¢  `, st.ok ? (blink(T, 3) ? 'g' : 'h') : 'd');
+    put(74, 25, st.ok ? '  click to install' : ` ${st.why}`.slice(0, 22), st.ok ? 'g' : 'r');
+  } else put(74, 24, '   ★ MAX ★', 'h');
 }
 
 /* ---------- tabs ---------- */
@@ -717,12 +742,14 @@ function renderTabs(){
   tabs.innerHTML = '';
   const mk = (label, id, ok, isNew) => { const b = document.createElement('button'); b.textContent = label; b.disabled = !ok;
     b.className = (id === view ? 'on ' : '') + (isNew ? 'new' : ''); if (ok) b.onclick = () => setView(id); tabs.appendChild(b); };
-  mk('📊 Overview', 'overview', true, false);
-  STAGES.forEach((s, i) => { const ok = G.unlocked[s.id]; mk(`${ok ? '' : '🔒 '}${i + 1} ${s.title}${ok && !G.seen[s.id] ? ' ✨NEW' : ''}`, s.id, ok, ok && !G.seen[s.id]); });
+  STAGES.forEach((s, i) => { const ok = G.unlocked[s.id]; mk(`${ok ? '' : '🔒 '}${i + 1} ${s.title}${ok && !G.seen[s.id] ? ' ✨NEW' : ''}`, s.id, ok, ok && !G.seen[s.id] && s.id !== view); });
   PLANNED.forEach((n, k) => mk(`🔒 ${STAGES.length + k + 1} ${n === 'FINAL QC' ? 'Final QC' : n[0] + n.slice(1).toLowerCase()}`, '', false, false));
+  const fo = floorOpen();
+  mk(`${fo ? '' : '🔒 '}🏭 Factory Floor${fo && !G.seen.overview ? ' ✨NEW' : ''}`, 'overview', fo, fo && !G.seen.overview && view !== 'overview');
 }
 function setView(id){
-  view = id; pops = []; if (id !== 'overview') G.seen[id] = true;
+  if (id === 'overview' && !floorOpen()) id = 'inspect';
+  view = id; pops = []; G.seen[id] = true;
   renderTabs(); shopKey = ''; renderShop();
   document.getElementById('title').textContent = id === 'overview' ? '🍋 LEMONADE TYCOON :: OVERVIEW' : `🍋 LEMONADE TYCOON :: STAGE ${stageIdx(id) + 1}`;
   document.getElementById('shopT').textContent = `UPGRADE — ${id === 'overview' ? '' : stageOf(id).title.toUpperCase()}`;
@@ -735,6 +762,7 @@ const shop = document.getElementById('shop');
 let shopKey = '';
 const pipStr = id => stageOf(id).upgrade.levels.map((lv_, k) => k < lvl(id) ? (lv_.kind === 'big' ? '◆' : '●') : (lv_.kind === 'big' ? '◇' : '○')).join('');
 function renderShop(){
+  return;                                                  // upgrades now live inside the main screen (upgradePanel)
   if (view === 'overview') return;
   const s = stageOf(view), l = lvl(s.id), n = maxLvl(s.id), nx = l < n ? lvlData(s.id, l + 1) : null, cur = l > 0 ? lvlData(s.id, l) : null;
   const pct = nx && cur ? Math.round((nx.rate / cur.rate - 1) * 100) : 0;
@@ -753,26 +781,32 @@ function renderShop(){
   else { b.textContent = `Buy · ${card.cost} 🪙`; b.disabled = G.coins < card.cost; b.onclick = () => buy(s.id); }
   d.appendChild(b); shop.appendChild(d);
 }
-function buy(id){
+function buy(id, viaFloor = false){
   const s = stageOf(id), l = lvl(id);
-  if (!s || l >= maxLvl(id) || !G.unlocked[id]) return;
-  if (l === 0 && !mastered(id)) return;
-  const nx = lvlData(id, l + 1); if (G.coins < nx.cost) return;
+  if (!s || !G.unlocked[id]) return;
+  const st = buyState(id, viaFloor); if (!st.ok) return;
+  const nx = lvlData(id, l + 1);
   G.coins -= nx.cost; G.lvl[id] = l + 1;
   FXS.push({ i: stageIdx(id), kind: nx.kind, t: 0 });
   if (view !== 'overview') pop(46, 13, nx.kind === 'small' ? '▲ SPEED UP!' : '★ NEW!', 'h');
+  if (PER_LEVEL_MASTERY[id]){                              // next level must be earned again in the stage tab; the floor skips it
+    G.m[id] = viaFloor || l + 1 >= maxLvl(id) ? { p: 100, done: true } : { p: 0, done: false };
+  }
   if (l === 0){                                           // automation: unlock the next process
     const nxt = STAGES[stageIdx(id) + 1];
-    if (nxt && !G.unlocked[nxt.id]){ G.unlocked[nxt.id] = true; say(`🤖 ${nx.name}! 🔓 ${nxt.title} unlocked — check its tab.`); }
+    if (nxt && !G.unlocked[nxt.id]){ G.unlocked[nxt.id] = true; say(`🤖 ${nx.name}! 🔓 ${nxt.title} unlocked — click its flashing tab.`); }
     else say(`🤖 ${nx.name}!`);
-  } else say(`${nx.kind === 'big' ? '★' : '▲'} ${nx.name}`);
-  renderTabs(); shopKey = ''; renderShop(); save();
+    if (floorOpen() && !G.seen.overview) say('🏭 THE LINE IS COMPLETE! Click the flashing Factory Floor tab to optimize it.');
+  } else if (PER_LEVEL_MASTERY[id] && !viaFloor && l + 1 < maxLvl(id)) say(`${nx.kind === 'big' ? '★' : '▲'} ${nx.name} — master the harder belt to unlock the next level.`);
+  else say(`${nx.kind === 'big' ? '★' : '▲'} ${nx.name}`);
+  renderTabs(); shopKey = ''; save();
 }
 
 /* ---------- input ---------- */
 scr.addEventListener('pointerdown', e => {
-  const r = scr.getBoundingClientRect();
-  MODS[view].click((e.clientX - r.left) / (r.width / W), (e.clientY - r.top) / (r.height / H));
+  const r = scr.getBoundingClientRect(), cx = (e.clientX - r.left) / (r.width / W), cy = (e.clientY - r.top) / (r.height / H);
+  if (view !== 'overview' && cx >= BUY_RECT.x1 && cx <= BUY_RECT.x2 && cy >= BUY_RECT.y1 && cy <= BUY_RECT.y2){ buy(view); return; }
+  MODS[view].click(cx, cy);
 });
 scr.addEventListener('pointermove', e => { if (view !== 'overview'){ HOVER = -1; return; } const r = scr.getBoundingClientRect(); HOVER = ovHit((e.clientX - r.left) / (r.width / W), (e.clientY - r.top) / (r.height / H)); });
 scr.addEventListener('pointerleave', () => { HOVER = -1; });
@@ -794,7 +828,7 @@ if (secsAway > 30){
   const away = Math.floor(secsAway * lineStats().income * .5);
   if (away > 0){ G.coins += away; setTimeout(() => say(`Welcome back! Your line earned ${away} 🪙 while you were away.`), 100); }
 }
-fit(); setView(lineStats().chain.length ? 'overview' : 'inspect');
+fit(); setView(floorOpen() ? 'overview' : (STAGES.find(s => G.unlocked[s.id] && !automated(s.id)) || STAGES[0]).id);
 let last = performance.now(), acc = 0, saveT = 0;
 function frame(now){
   const dt = Math.min(.1, (now - last) / 1000); last = now;
@@ -810,7 +844,7 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 window.addEventListener('beforeunload', save);
-window.__T = { get G(){ return G; }, GR, I, SIM, buy, setView, grCrank, grDose, CEN, STAGES, MC, PR, PS, QC, mcClick, psClick, qcClick, prHold, lineStats, steady, rateAt, FXS, TARGET, get view(){ return view; } };
+window.__T = { get G(){ return G; }, GR, I, SIM, buy, setView, grCrank, grDose, CEN, STAGES, MC, PR, PS, QC, mcClick, psClick, qcClick, prHold, lineStats, steady, rateAt, FXS, TARGET, buyState, floorOpen, mcLayout, get view(){ return view; } };
 requestAnimationFrame(frame);
 </script>
 </body>
