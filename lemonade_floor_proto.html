@@ -70,6 +70,7 @@ const scr = document.getElementById('scr');
    ====================================================================== */
 const DEFAULT_P = {
   startCoins: 3000,       // coins you walk onto the floor with
+  inspectStart: 3,        // Inspection starts at this level on the floor
   bonusLevel2: 1,         // 1 = Pasteurizer and Final QC are installed at Lv 2 (free bonus with their first upgrade)
   target: 3.0,            // lemons/s needed for 100% efficiency
   hold: 20,               // seconds you must hold 100% to win
@@ -168,7 +169,7 @@ const plainName = t => t.replace(/^\S+\s/, '');
 const fmtT = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const setView = () => {};
 function say(s){ document.getElementById('msg').textContent = s; msgT = 7; }
-function startLevels(){ const lv = {}; STAGES.forEach(s => lv[s.id] = 1); if (P.bonusLevel2){ lv.pasteur = 2; lv.qc = 2; } return lv; }
+function startLevels(){ const lv = {}; STAGES.forEach(s => lv[s.id] = 1); if (P.bonusLevel2){ lv.pasteur = 2; lv.qc = 2; } lv.inspect = Math.max(1, Math.min(P.inspectStart, maxLvl('inspect'))); return lv; }
 function newGame(){
   buildStages();
   G = { coins: P.startCoins, lvl: startLevels(), unlocked: {}, lost: 0, won: false, winT: null, t: 0, bought: 0, hist: [], lastHist: 0, marks: {}, log: [] };
@@ -386,7 +387,7 @@ function renderTools(){
   mk('↺ Restart', () => { newGame(); renderTools(); say('Restarted.'); }, false);
   lab('Cheat:'); [500, 5000].forEach(v => mk('+' + v + '¢', () => { G.coins += v; }, false));
 }
-const GL = [['startCoins', 'Start coins'], ['bonusLevel2', 'Pasteur+QC start Lv2 (1/0)'], ['target', 'Target lemons/s'], ['hold', 'Hold-to-win secs'], ['queueCap', 'Pile size (spill)'], ['price', 'Price multiplier'], ['proc', 'Processing cost (× value)'], ['spill', 'Spill penalty ¢/lemon'], ['smallGrowth', 'Small level speed ×'], ['smallCost', 'Small level cost ×'], ['machCost', 'Machine cost ×'], ['costScale', 'All costs ×']];
+const GL = [['startCoins', 'Start coins'], ['inspectStart', 'Inspection starts at Lv'], ['bonusLevel2', 'Pasteur+QC start Lv2 (1/0)'], ['target', 'Target lemons/s'], ['hold', 'Hold-to-win secs'], ['queueCap', 'Pile size (spill)'], ['price', 'Price multiplier'], ['proc', 'Processing cost (× value)'], ['spill', 'Spill penalty ¢/lemon'], ['smallGrowth', 'Small level speed ×'], ['smallCost', 'Small level cost ×'], ['machCost', 'Machine cost ×'], ['costScale', 'All costs ×']];
 function renderForm(){
   const g = document.getElementById('globals'); g.innerHTML = '';
   GL.forEach(([k, l]) => { const lb = document.createElement('label'); lb.textContent = l; const i = document.createElement('input'); i.type = 'number'; i.step = 'any'; i.value = P[k]; i.dataset.k = k; lb.appendChild(i); g.appendChild(lb); });

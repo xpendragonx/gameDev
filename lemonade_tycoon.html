@@ -83,7 +83,7 @@ const TARGET = 3.0;            // lemons/s the line must deliver, with no waste,
 const HOLD_TO_WIN = 20;        // seconds you must hold 100% to win
 const QUEUE_CAP = 12;          // lemons a stage's input pile holds; extras spill and are lost for good
 const PROC = 0.0, SPILL_COST = 0.0, PRICE = 1.0;
-const FLOOR_START_COINS = 3000;            // gift when the factory floor first opens
+const FLOOR_START_COINS = 3000, FLOOR_INSPECT_LEVEL = 3;   // on the factory floor Inspection starts at least at this level            // gift when the factory floor first opens
 const BONUS_LEVEL2 = ['pasteur', 'qc'];    // their first upgrade comes with Lv 2 free
 const SMALL_GROWTH = 1.28, SMALL_COST = 1.2, MACH_COST = 1.6, COST_SCALE = 1.0;
 
@@ -701,7 +701,7 @@ function draw(){
 }
 
 /* ---------- upgrade panel (drawn inside the main screen; click the BUY button) ---------- */
-const BUY_RECT = { x1: 72, x2: 97, y1: 23, y2: 26 };
+const BUY_RECT = { x1: 2, x2: 97, y1: 23, y2: 26 };       // the whole yellow upgrade box is the button
 function buyState(id, viaFloor = false){
   const l = lvl(id);
   if (l >= maxLvl(id)) return { ok: false, why: 'MAXED OUT' };
@@ -713,7 +713,7 @@ function buyState(id, viaFloor = false){
 }
 function upgradePanel(){
   const s = stageOf(view), l = lvl(s.id), n = maxLvl(s.id), nx = l < n ? lvlData(s.id, l + 1) : null, cur = l > 0 ? lvlData(s.id, l) : null, st = buyState(s.id);
-  box(2, 23, 96, 4, 'h'); put(4, 23, ' UPGRADE ', 'h');
+  box(2, 23, 96, 4, 'h'); put(4, 23, st.ok ? ' UPGRADE — click anywhere in this box ' : ' UPGRADE ', 'h');
   put(4, 24, plainName(s.upgrade.title), 't');
   s.upgrade.levels.forEach((lv_, k) => put(26 + k, 24, k < l ? (lv_.kind === 'big' ? '◆' : '●') : (lv_.kind === 'big' ? '◇' : '○'), k < l ? 'h' : 'd'));
   put(42, 24, `Lv ${l}/${n}`, 's');
@@ -787,8 +787,13 @@ function buy(id, viaFloor = false){
     let msg = `🤖 ${nx.name}!`;
     if (bonus) msg += ' Free bonus: upgraded to Lv 2!';
     if (nxt && !G.unlocked[nxt.id]){ G.unlocked[nxt.id] = true; msg += ` 🔓 ${nxt.title} unlocked — click its flashing tab.`; }
-    if (floorOpen() && !G.floorGift){ G.floorGift = true; G.coins += FLOOR_START_COINS; msg += ` 🏭 THE LINE IS COMPLETE! Investors give you ${FLOOR_START_COINS} coins to tune it: click the flashing Factory Floor tab.`; }
+    if (floorOpen() && !G.floorGift){
+      G.floorGift = true; G.coins += FLOOR_START_COINS;
+      if (lvl('inspect') < FLOOR_INSPECT_LEVEL){ G.lvl.inspect = FLOOR_INSPECT_LEVEL; G.m.inspect = { p: 100, done: true }; FXS.push({ i: 0, kind: 'small', t: 0 }); }
+      msg += ` 🏭 THE LINE IS COMPLETE! Investors give you ${FLOOR_START_COINS} coins and upgrade Inspection to Lv ${FLOOR_INSPECT_LEVEL}. Click the flashing Factory Floor tab.`;
+    }
     say(msg);
+    if (!viaFloor && view === id && nxt && !floorOpen()) setView(nxt.id);       // move on to the process you just unlocked
   } else if (PER_LEVEL_MASTERY[id] && !viaFloor && l + 1 < maxLvl(id)) say(`${nx.kind === 'big' ? '★' : '▲'} ${nx.name} — master the harder belt to unlock the next level.`);
   else say(`${nx.kind === 'big' ? '★' : '▲'} ${nx.name}`);
   renderTabs(); shopKey = ''; save();
