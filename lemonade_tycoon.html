@@ -13,6 +13,7 @@
   .ctl{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--mute)}
   button{font:inherit;font-size:13px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:6px 12px;cursor:pointer}
   button:hover:not(:disabled){border-color:var(--accent)}
+  .ctl button.on{background:var(--accent);color:#1a1200;border-color:var(--accent);font-weight:700}
   button:disabled{opacity:.45;cursor:not-allowed}
   .wrap{padding:0 16px 24px;max-width:1500px;margin:0 auto}
   #tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
@@ -40,7 +41,7 @@
 <body>
 <header>
   <h1 id="title">🍋 LEMONADE TYCOON</h1>
-  <div class="ctl"><button id="reset">Reset save</button></div>
+  <div class="ctl">Line speed <button data-sp="1">1×</button><button data-sp="2" class="on">2×</button><button data-sp="5">5×</button> <button id="reset">Reset save</button></div>
 </header>
 <div class="wrap">
   <div id="tabs"></div>
@@ -58,7 +59,7 @@ const ch = new Array(W * H), co = new Array(W * H);
 const scr = document.getElementById('scr');
 
 /* ======================================================================
-   CONFIG  —  the whole factory is described here
+   CONFIG  —  the whole factory is described here (numbers tuned in lemonade_floor_proto.html)
    ----------------------------------------------------------------------
    Every stage has ONE upgrade track made of levels:
      level 0 = manual (you play the minigame)
@@ -68,39 +69,34 @@ const scr = document.getElementById('scr');
         kind 'big'   = a whole new machine (extra motor, extra vat...)
    rate = lemons per second the stage can process at that level.
    Builders:
-     small(installName, label, n, r0, dr, c0, g)  n levels, rate r0 + dr*i, cost c0*g^i
-     machines(installName, noun, n, base, c0, g)  n machines, rate = base × machineCount
-   Or hand-write levels: [{kind:'auto', name:'…', rate:1, cost:30, count:1}, …]
+     small(installName, label, n, r0, c0)    n levels, rate r0 × SMALL_GROWTH^i, cost c0 × SMALL_COST^i
+     machines(installName, noun, n, base, c0) n machines, rate = base × machineCount, cost c0 × MACH_COST^i
    WIN: line efficiency (lemons sold ÷ lemons in, and output ÷ TARGET) held at 100%.
-   Lost lemons are lost money: every stage charges PROC × its value per lemon it
-   processes, so a lemon that spills later still cost you the work already done.
+   Profit = lemons sold per second × what each lemon sells for (sum of the stage values × PRICE).
+   Spilled lemons only hurt efficiency (SPILL_COST and PROC can add a coin penalty; 0 = none).
 
    TO ADD A STAGE:  1) add an entry to STAGES (order = line order)
                     2) add a module {step, draw, click} to MODS
                     3) add a machine picture in ovMachine()
    ====================================================================== */
-const TARGET = 3.0;        // lemons/s the line must deliver, with no waste, for 100% efficiency
-const HOLD_TO_WIN = 20;    // seconds you must hold 100% to win
-const QUEUE_CAP = 12;      // lemons a stage's input pile holds; extras spill and are lost for good
-const PROC = 0.4;          // processing cost per lemon = PROC × the stage's value
+const TARGET = 3.0;            // lemons/s the line must deliver, with no waste, for 100% efficiency
+const HOLD_TO_WIN = 20;        // seconds you must hold 100% to win
+const QUEUE_CAP = 12;          // lemons a stage's input pile holds; extras spill and are lost for good
+const PROC = 0.0, SPILL_COST = 0.0, PRICE = 1.0;
+const FLOOR_START_COINS = 3000;            // gift when the factory floor first opens
+const BONUS_LEVEL2 = ['pasteur', 'qc'];    // their first upgrade comes with Lv 2 free
+const SMALL_GROWTH = 1.28, SMALL_COST = 1.2, MACH_COST = 1.6, COST_SCALE = 1.0;
 
-const small = (inst, label, n, r0, dr, c0, g) => Array.from({ length: n }, (_, i) => ({ kind: i ? 'small' : 'auto', name: i ? `${label} +${i}` : inst, rate: +(r0 + dr * i).toFixed(3), cost: Math.round(c0 * Math.pow(g, i)), count: 1 }));
-const machines = (inst, noun, n, base, c0, g) => Array.from({ length: n }, (_, i) => ({ kind: i ? 'big' : 'auto', name: i ? `Add ${noun} #${i + 1}` : inst, rate: +(base * (i + 1)).toFixed(3), cost: Math.round(c0 * Math.pow(g, i)), count: i + 1 }));
+const small = (inst, label, n, r0, c0) => Array.from({ length: n }, (_, i) => ({ kind: i ? 'small' : 'auto', name: i ? `${label} +${i}` : inst, rate: +(r0 * Math.pow(SMALL_GROWTH, i)).toFixed(3), cost: Math.round(COST_SCALE * c0 * Math.pow(SMALL_COST, i)), count: 1 }));
+const machines = (inst, noun, n, base, c0) => Array.from({ length: n }, (_, i) => ({ kind: i ? 'big' : 'auto', name: i ? `Add ${noun} #${i + 1}` : inst, rate: +(base * (i + 1)).toFixed(3), cost: Math.round(COST_SCALE * c0 * Math.pow(MACH_COST, i)), count: i + 1 }));
 
 const STAGES = [
-  { id: 'inspect',  name: 'INSPECT',  title: 'Inspection',  value: 1.0, upgrade: { title: '🤖 Auto-Inspector',  levels: small('Install auto-inspector', 'Faster belt', 8, 1.0, 0.35, 30, 1.28) } },
-  { id: 'grind',    name: 'GRIND',    title: 'Grinder',     value: 1.5, upgrade: { title: '⚡ Auto-Grinder',    levels: machines('Install first motor', 'motor', 4, 0.95, 80, 2.2) } },
-  { id: 'macerate', name: 'MACERATE', title: 'Maceration',  value: 1.0, upgrade: { title: '🛢 Maceration Vats', levels: machines('Install first vat', 'vat', 4, 1.0, 150, 2.2) } },
-  { id: 'press',    name: 'PRESS',    title: 'Press',       value: 2.5, upgrade: { title: '🗜 Hydraulic Press', levels: small('Install hydraulic press', 'More force', 8, 0.9, 0.45, 250, 1.3) } },
-  { id: 'pasteur',  name: 'PASTEUR',  title: 'Pasteurizer', value: 2.0, upgrade: { title: '♨ Heat Exchanger',   levels: small('Install heat exchanger', 'Faster conveyor', 8, 1.0, 0.45, 400, 1.3) } },
-  { id: 'qc',       name: 'FINAL QC', title: 'Final QC',    value: 3.0, upgrade: { title: '🔬 Auto-QC Lab',     levels: [
-      { kind: 'auto',  name: 'Install QC lab',        rate: 0.9, cost: 500,  count: 1 },
-      { kind: 'small', name: 'Calibrate instruments', rate: 1.4, cost: 700,  count: 1 },
-      { kind: 'big',   name: 'Add analyst bench #2',  rate: 2.2, cost: 1600, count: 2 },
-      { kind: 'small', name: 'Faster assays',         rate: 2.7, cost: 1100, count: 2 },
-      { kind: 'big',   name: 'Add analyst bench #3',  rate: 3.5, cost: 2800, count: 3 },
-      { kind: 'small', name: 'Better reagents',       rate: 3.9, cost: 1700, count: 3 },
-      { kind: 'small', name: 'Robotic sampler',       rate: 4.4, cost: 2100, count: 3 } ] } },
+  { id: 'inspect',  name: 'INSPECT',  title: 'Inspection',  value: 1.0, upgrade: { title: '🤖 Auto-Inspector',  levels: small('Install auto-inspector', 'Faster belt', 12, 0.20, 15) } },
+  { id: 'grind',    name: 'GRIND',    title: 'Grinder',     value: 1.5, upgrade: { title: '⚡ Auto-Grinder',    levels: machines('Install first motor', 'motor', 4, 0.80, 60) } },
+  { id: 'macerate', name: 'MACERATE', title: 'Maceration',  value: 1.0, upgrade: { title: '🛢 Maceration Vats', levels: machines('Install first vat', 'vat', 4, 0.85, 100) } },
+  { id: 'press',    name: 'PRESS',    title: 'Press',       value: 2.5, upgrade: { title: '🗜 Hydraulic Press', levels: small('Install hydraulic press', 'More force', 12, 0.23, 80) } },
+  { id: 'pasteur',  name: 'PASTEUR',  title: 'Pasteurizer', value: 2.0, upgrade: { title: '♨ Heat Exchanger',   levels: small('Install heat exchanger', 'Faster conveyor', 12, 0.245, 110) } },
+  { id: 'qc',       name: 'FINAL QC', title: 'Final QC',    value: 3.0, upgrade: { title: '🔬 Auto-QC Lab',     levels: small('Install QC lab', 'Faster assays', 12, 0.26, 150) } },
 ];
 const PER_LEVEL_MASTERY = { inspect: true };   // stages where EVERY upgrade needs the minigame mastered again (the stage tab only; the factory floor upgrades freely)
 const PLANNED = [];      // names of stages not built yet (shown locked); empty = the whole line exists
@@ -156,18 +152,11 @@ window.addEventListener('resize', fit);
 /* ======================================================================
    GLOBAL GAME MODEL  (shared by every stage)
    ====================================================================== */
-const KEY = 'lemonTycoon.v4';
-const freshState = () => ({ coins: 0, lost: 0, won: false, lvl: {}, unlocked: { inspect: true }, seen: { inspect: true }, m: {}, sorted: 0, best: 0, grinds: 0, gbest: 0, t: Date.now() });
+const KEY = 'lemonTycoon.v5';
+const freshState = () => ({ coins: 0, lost: 0, won: false, floorGift: false, lvl: {}, unlocked: { inspect: true }, seen: { inspect: true }, m: {}, sorted: 0, best: 0, grinds: 0, gbest: 0, t: Date.now() });
 let G = freshState();
 try {
   let s = JSON.parse(localStorage.getItem(KEY) || 'null');
-  if (!s) s = JSON.parse(localStorage.getItem('lemonTycoon.v3') || 'null');   // v3 saves carry over (levels get clamped below)
-  if (!s){   // migrate a v2 save (several upgrades per stage) to one-upgrade-per-stage
-    const o = JSON.parse(localStorage.getItem('lemonTycoon.v2') || 'null');
-    if (o){ s = freshState(); s.coins = o.coins || 0; s.sorted = o.sorted || 0; s.best = o.best || 0; s.grinds = o.grinds || 0; s.gbest = o.gbest || 0;
-      s.m = o.m || {}; s.unlocked = Object.assign({ inspect: true }, o.unlocked); s.seen = Object.assign({}, s.unlocked);
-      s.lvl = { inspect: (o.up && o.up.auto) ? 1 : 0, grind: (o.up && o.up.g_motor) ? 1 : 0 }; }
-  }
   if (s){ const f = freshState(); G = Object.assign(f, s); G.lvl = s.lvl || {}; G.m = s.m || {}; G.unlocked = Object.assign({ inspect: true }, s.unlocked); G.seen = Object.assign({ inspect: true }, s.seen); }
 } catch (e) {}
 G.n = G.n || {};
@@ -184,7 +173,7 @@ const automated = id => lvl(id) > 0;
 const mastery = id => G.m[id] || (G.m[id] = { p: 0, done: false });
 const mastered = id => mastery(id).done;
 const mult = id => mastered(id) ? 1.5 : 1;                       // manual-play bonus once mastered
-const cumValue = i => STAGES.slice(0, i + 1).reduce((a, s) => a + s.value, 0);
+const cumValue = i => PRICE * STAGES.slice(0, i + 1).reduce((a, s) => a + s.value, 0);
 const plainName = t => t.replace(/^\S+\s/, '');
 STAGES.forEach(s => { if ((G.lvl[s.id] || 0) > maxLvl(s.id)) G.lvl[s.id] = maxLvl(s.id); });
 G.lost = G.lost || 0; G.won = !!G.won;
@@ -215,7 +204,7 @@ function steady(levels = G.lvl){           // closed-form steady state for a set
   if (!c.length) return { chain: c, sold: 0, intake: 0, profit: 0, eff: 0, bott: -1, spills: [] };
   const r = c.map(s => rateAt(s.id, levels[s.id])); let f = r[0], cost = r[0] * procCost(c[0]), b = 0; const spills = [0];
   r.forEach((v, i) => { if (v < r[b]) b = i; });
-  for (let i = 1; i < c.length; i++){ spills[i] = Math.max(0, f - r[i]); f = Math.min(f, r[i]); cost += f * procCost(c[i]); }
+  for (let i = 1; i < c.length; i++){ spills[i] = Math.max(0, f - r[i]); f = Math.min(f, r[i]); cost += f * procCost(c[i]) + spills[i] * SPILL_COST; }
   const profit = f * cumValue(c.length - 1) - cost;
   return { chain: c, sold: f, intake: r[0], profit, eff: Math.min(1, f / r[0]) * Math.min(1, f / TARGET), bott: b, spills };
 }
@@ -230,7 +219,7 @@ function simStep(dt){
     if (i > 0) SIM.buf[s.id] -= done; else intake = done;
     cost += done * procCost(s);
     let spilled = 0;
-    if (nxt){ const room = Math.max(0, QUEUE_CAP - (SIM.buf[nxt.id] || 0)), push = Math.min(done, room); SIM.buf[nxt.id] = (SIM.buf[nxt.id] || 0) + push; spilled = done - push; G.lost += spilled; }
+    if (nxt){ const room = Math.max(0, QUEUE_CAP - (SIM.buf[nxt.id] || 0)), push = Math.min(done, room); SIM.buf[nxt.id] = (SIM.buf[nxt.id] || 0) + push; spilled = done - push; G.lost += spilled; cost += spilled * SPILL_COST; }
     else { sold = done; rev = done * cumValue(i); }
     SIM.util[s.id] = (SIM.util[s.id] || 0) + ((want > 0 ? done / want : 0) - (SIM.util[s.id] || 0)) * a1;
     SIM.out[s.id] = (SIM.out[s.id] || 0) + (done / dt - (SIM.out[s.id] || 0)) * a1;
@@ -262,7 +251,7 @@ function inspExit(l){
   pop(X1 - 2, Y - 1, '-2', 'r');
 }
 const inspPlaying = () => !automated('inspect') || (PER_LEVEL_MASTERY.inspect && !mastered('inspect') && lvl('inspect') < maxLvl('inspect'));
-const inspSpeed = () => 5 + 0.6 * Math.max(0, lvl('inspect') - 1), inspEvery = () => 1 / (1 + 0.1 * Math.max(0, lvl('inspect') - 1));   // the minigame gets harder with each level
+const inspSpeed = () => 5 + 0.4 * Math.min(8, Math.max(0, lvl('inspect') - 1)), inspEvery = () => 1 / (1 + 0.08 * Math.min(8, Math.max(0, lvl('inspect') - 1)));   // the minigame gets harder with each level
 function inspClick(cx, cy){
   if (!inspPlaying()) return;                             // the machine does the job now
   let best = null, bd = 1e9;
@@ -628,7 +617,7 @@ function ovMachine(i){
   }
   let cv = ''; for (let k = 0; k < 8; k++) cv += mod3(k, f) === 0 ? '›' : '═'; put(x + 1, BELT_Y, cv, 's');
   if (!run) put(x + 4, 15 + (s.id === 'grind' || s.id === 'macerate' ? 2 : 0), 'zz', 'd');
-  s.upgrade.levels.forEach((lv_, k) => put(x + 1 + k, 20, k < l ? (lv_.kind === 'big' ? '◆' : '●') : (lv_.kind === 'big' ? '◇' : '○'), k < l ? 'h' : 'd'));
+  s.upgrade.levels.forEach((lv_, k) => put(x + k, 20, k < l ? (lv_.kind === 'big' ? '◆' : '●') : (lv_.kind === 'big' ? '◇' : '○'), k < l ? 'h' : 'd'));
   const nx = nextLevel(s);
   put(x + 1, 21, nx ? `▲${nx.cost}¢` : 'MAX', nx ? (G.coins >= nx.cost ? 'g' : 'd') : 'd');
 }
@@ -727,7 +716,7 @@ function upgradePanel(){
   box(2, 23, 96, 4, 'h'); put(4, 23, ' UPGRADE ', 'h');
   put(4, 24, plainName(s.upgrade.title), 't');
   s.upgrade.levels.forEach((lv_, k) => put(26 + k, 24, k < l ? (lv_.kind === 'big' ? '◆' : '●') : (lv_.kind === 'big' ? '◇' : '○'), k < l ? 'h' : 'd'));
-  put(36, 24, `Lv ${l}/${n}`, 's');
+  put(42, 24, `Lv ${l}/${n}`, 's');
   const pct = nx && cur ? Math.round((nx.rate / cur.rate - 1) * 100) : 0;
   put(4, 25, !nx ? 'Fully upgraded.' : l === 0 ? `${nx.name}: automates ${s.title} and unlocks the next process.` : `Next: ${nx.name} (${nx.kind === 'big' ? 'big upgrade' : 'small upgrade'}, about +${pct}% speed)`, 'd');
   if (nx){
@@ -787,6 +776,7 @@ function buy(id, viaFloor = false){
   const st = buyState(id, viaFloor); if (!st.ok) return;
   const nx = lvlData(id, l + 1);
   G.coins -= nx.cost; G.lvl[id] = l + 1;
+  const bonus = l === 0 && BONUS_LEVEL2.includes(id); if (bonus) G.lvl[id] = 2;       // free Lv 2 with the first install
   FXS.push({ i: stageIdx(id), kind: nx.kind, t: 0 });
   if (view !== 'overview') pop(46, 13, nx.kind === 'small' ? '▲ SPEED UP!' : '★ NEW!', 'h');
   if (PER_LEVEL_MASTERY[id]){                              // next level must be earned again in the stage tab; the floor skips it
@@ -794,9 +784,11 @@ function buy(id, viaFloor = false){
   }
   if (l === 0){                                           // automation: unlock the next process
     const nxt = STAGES[stageIdx(id) + 1];
-    if (nxt && !G.unlocked[nxt.id]){ G.unlocked[nxt.id] = true; say(`🤖 ${nx.name}! 🔓 ${nxt.title} unlocked — click its flashing tab.`); }
-    else say(`🤖 ${nx.name}!`);
-    if (floorOpen() && !G.seen.overview) say('🏭 THE LINE IS COMPLETE! Click the flashing Factory Floor tab to optimize it.');
+    let msg = `🤖 ${nx.name}!`;
+    if (bonus) msg += ' Free bonus: upgraded to Lv 2!';
+    if (nxt && !G.unlocked[nxt.id]){ G.unlocked[nxt.id] = true; msg += ` 🔓 ${nxt.title} unlocked — click its flashing tab.`; }
+    if (floorOpen() && !G.floorGift){ G.floorGift = true; G.coins += FLOOR_START_COINS; msg += ` 🏭 THE LINE IS COMPLETE! Investors give you ${FLOOR_START_COINS} coins to tune it: click the flashing Factory Floor tab.`; }
+    say(msg);
   } else if (PER_LEVEL_MASTERY[id] && !viaFloor && l + 1 < maxLvl(id)) say(`${nx.kind === 'big' ? '★' : '▲'} ${nx.name} — master the harder belt to unlock the next level.`);
   else say(`${nx.kind === 'big' ? '★' : '▲'} ${nx.name}`);
   renderTabs(); shopKey = ''; save();
@@ -829,11 +821,15 @@ if (secsAway > 30){
   if (away > 0){ G.coins += away; setTimeout(() => say(`Welcome back! Your line earned ${away} 🪙 while you were away.`), 100); }
 }
 fit(); setView(floorOpen() ? 'overview' : (STAGES.find(s => G.unlocked[s.id] && !automated(s.id)) || STAGES[0]).id);
+let SPEED = 2;
+try { SPEED = +localStorage.getItem('lemonTycoon.speed') || 2; } catch (e) {}
+function setSpeed(v){ SPEED = v; try { localStorage.setItem('lemonTycoon.speed', v); } catch (e) {} document.querySelectorAll('[data-sp]').forEach(b => b.classList.toggle('on', +b.dataset.sp === v)); }
+document.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => setSpeed(+b.dataset.sp)); setSpeed(SPEED);
 let last = performance.now(), acc = 0, saveT = 0;
 function frame(now){
   const dt = Math.min(.1, (now - last) / 1000); last = now;
   T += dt;
-  simStep(dt);
+  { let rem = dt * SPEED; while (rem > 0){ const st = Math.min(.1, rem); simStep(st); rem -= st; } }
   const m = MODS[view]; if (m.step) m.step(dt);
   pops = pops.filter(p => (p.t += dt) < 1);
   FXS.forEach(f => f.t += dt); while (FXS.length && FXS[0].t > 1.8) FXS.shift();
@@ -844,7 +840,7 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 window.addEventListener('beforeunload', save);
-window.__T = { get G(){ return G; }, GR, I, SIM, buy, setView, grCrank, grDose, CEN, STAGES, MC, PR, PS, QC, mcClick, psClick, qcClick, prHold, lineStats, steady, rateAt, FXS, TARGET, buyState, floorOpen, mcLayout, get view(){ return view; } };
+window.__T = { get G(){ return G; }, GR, I, SIM, buy, setView, grCrank, grDose, CEN, STAGES, MC, PR, PS, QC, mcClick, psClick, qcClick, prHold, lineStats, steady, rateAt, FXS, TARGET, buyState, floorOpen, mcLayout, setSpeed, BONUS_LEVEL2, get view(){ return view; } };
 requestAnimationFrame(frame);
 </script>
 </body>

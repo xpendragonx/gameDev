@@ -154,7 +154,7 @@ window.addEventListener('resize', fit);
 /* ======================================================================
    GAME MODEL
    ====================================================================== */
-let G, T = 0, msgT = 0, speed = 1, paused = false, shopKey = '';
+let G, T = 0, msgT = 0, speed = 2, paused = false, shopKey = '';
 const stageOf = id => STAGES.find(s => s.id === id);
 const stageIdx = id => STAGES.findIndex(s => s.id === id);
 const lvl = id => G.lvl[id] || 0;
@@ -381,7 +381,7 @@ function renderTools(){
   tools.innerHTML = '';
   const mk = (txt, fn, on) => { const b = document.createElement('button'); b.textContent = txt; if (on) b.className = 'on'; b.onclick = fn; tools.appendChild(b); };
   const lab = t => { const s = document.createElement('span'); s.className = 'lbl'; s.textContent = t; tools.appendChild(s); };
-  lab('Speed:'); [1, 5, 20, 100].forEach(v => mk(v + '×', () => { speed = v; renderTools(); }, speed === v && !paused));
+  lab('Speed:'); [1, 2, 5, 20, 100].forEach(v => mk(v + '×', () => { speed = v; renderTools(); }, speed === v && !paused));
   mk(paused ? '▶ Play' : '⏸ Pause', () => { paused = !paused; renderTools(); }, false);
   mk('↺ Restart', () => { newGame(); renderTools(); say('Restarted.'); }, false);
   lab('Cheat:'); [500, 5000].forEach(v => mk('+' + v + '¢', () => { G.coins += v; }, false));
