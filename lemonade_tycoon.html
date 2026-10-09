@@ -155,7 +155,7 @@ window.addEventListener('resize', fit);
    GLOBAL GAME MODEL  (shared by every stage)
    ====================================================================== */
 const KEY = 'lemonTycoon.v5';
-const freshState = () => ({ coins: 0, lost: 0, won: false, floorGift: false, valve: 1, lvl: {}, unlocked: { inspect: true }, seen: { inspect: true }, m: {}, sorted: 0, best: 0, grinds: 0, gbest: 0, t: Date.now() });
+const freshState = () => ({ n: {}, coins: 0, lost: 0, won: false, floorGift: false, valve: 1, lvl: {}, unlocked: { inspect: true }, seen: { inspect: true }, m: {}, sorted: 0, best: 0, grinds: 0, gbest: 0, t: Date.now() });
 let G = freshState();
 try {
   let s = JSON.parse(localStorage.getItem(KEY) || 'null');
