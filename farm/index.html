@@ -6,11 +6,11 @@
 <title>Lemon Farm</title>
 <style>
   body { background: #1b1b12; color: #e8e2a0; margin: 0; padding: 16px; }
-  .buttons { display: flex; gap: 12px; justify-content: center; margin-top: 12px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 12px; }
   button { padding: 8px 16px; font: 16px monospace;
            background: #e8e2a0; color: #1b1b12; border: 0; border-radius: 4px; cursor: pointer; }
   button:active { background: #c9c37a; }
-  pre  { font: 18px/1.1 monospace; margin: 0 auto; width: max-content; max-width: 100%; overflow-x: auto; }
+  pre  { font: 15px/1.1 monospace; margin: 0 auto; width: max-content; max-width: 100%; overflow-x: auto; }
 </style>
 </head>
 <body>
@@ -19,15 +19,19 @@
   <button id="sell" type="button">Sell lemons</button>
   <button id="chop" type="button">Chop tree (C)</button>
   <button id="hire" type="button"></button>
+  <button id="land" type="button"></button>
 </div>
-<script src="farm.js?v=5"></script>
+<script src="farm.js?v=6"></script>
 <script>
   const params = new URLSearchParams(location.search);
   const game = Farm.newGame(params.has('seed') ? Number(params.get('seed')) : undefined);
   const screen = document.getElementById('screen');
+  const landBtn = document.getElementById('land');
   const hireBtn = document.getElementById('hire');
   const draw = () => {
     screen.textContent = Farm.render(game);
+    const lc = Farm.landCost(game);
+    landBtn.textContent = lc === null ? 'All land owned' : `Buy land (L) - ${lc} coins`;
     hireBtn.textContent = `Hire harvester (H) - ${Farm.harvesterCost(game)} coins`;
   };
   const dirs = {
@@ -42,11 +46,12 @@
     else if (k === 'c') Farm.chop(game);
     else if (k === 'b') Farm.buySapling(game);
     else if (k === 'h') Farm.hireHarvester(game);
+    else if (k === 'l') Farm.buyLand(game);
     else return;
     e.preventDefault();
     draw();
   });
-  for (const [id, action] of [['sell', Farm.sellLemons], ['chop', Farm.chop], ['hire', Farm.hireHarvester]]) {
+  for (const [id, action] of [['sell', Farm.sellLemons], ['chop', Farm.chop], ['hire', Farm.hireHarvester], ['land', Farm.buyLand]]) {
     document.getElementById(id).addEventListener('click', (e) => {
       action(game);
       e.currentTarget.blur();   // keep keyboard focus on the game, not the button
