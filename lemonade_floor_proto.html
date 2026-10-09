@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lemonade Floor Prototype</title>
+<style>
+  :root{--bg:#0a0f07;--panel:#141b0d;--line:#2f3d1c;--ink:#f4f2c8;--mute:#9aa57a;--accent:#ffe14d}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'DejaVu Sans Mono',Menlo,Consolas,'Liberation Mono',monospace}
+  header{display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center;justify-content:space-between;padding:12px 16px}
+  h1{margin:0;font-size:17px;letter-spacing:1px;color:var(--accent)}
+  button{font:inherit;font-size:13px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:6px 12px;cursor:pointer}
+  button:hover:not(:disabled){border-color:var(--accent)}
+  button.on{background:var(--accent);color:#1a1200;border-color:var(--accent);font-weight:700}
+  .wrap{padding:0 16px 24px;max-width:1500px;margin:0 auto}
+  .bar{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin-bottom:10px;font-size:12px;color:var(--mute)}
+  .bar .lbl{margin-left:10px}
+  #stats{font-size:12px;color:var(--mute);margin:0 0 8px}
+  #stats b{color:var(--accent)}
+  #screen{background:#070b04;border:1px solid var(--line);border-radius:8px;padding:10px;text-align:center;overflow:hidden;box-shadow:inset 0 0 40px rgba(0,0,0,.6)}
+  #scr{display:inline-block;margin:0;text-align:left;line-height:1.18;white-space:pre;font-family:inherit;user-select:none;-webkit-user-select:none;touch-action:manipulation;cursor:pointer}
+  #msg{margin-top:10px;min-height:22px;color:var(--accent);font-size:14px}
+  details{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-top:12px}
+  summary{cursor:pointer;color:var(--accent);font-size:14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px 16px;margin:10px 0}
+  .grid label{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--mute)}
+  input[type=number]{width:84px;background:#0a0f07;color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit;font-size:12px}
+  table{border-collapse:collapse;font-size:12px;margin:8px 0}
+  th,td{padding:3px 8px;text-align:right;color:var(--mute)} th{color:var(--accent)} td:first-child,th:first-child{text-align:left}
+  pre.rep{margin:8px 0 0;font-size:12px;line-height:1.35;white-space:pre-wrap;color:#c8e08a}
+  textarea{width:100%;height:120px;background:#0a0f07;color:var(--ink);border:1px solid var(--line);border-radius:4px;font:inherit;font-size:11px}
+  small{color:var(--mute)}
+  .t{color:#f4f2c8}.d{color:#58642f}.s{color:#9aa57a}.h{color:#ffe14d}.a{color:#ffe84d}.ad{color:#a8942a}
+  .g{color:#7ee05a}.w{color:#58b8ff}.wd{color:#2f6fa0}.j{color:#ffd21f}.y{color:#fff7a0}.m{color:#d9cc5c}
+  .p{color:#c18cff}.r{color:#ff6a4a}.k{color:#e8e8e8}
+</style>
+</head>
+<body>
+<header>
+  <h1>🍋 LEMONADE FLOOR PROTOTYPE <small>— stand-alone playtest of the factory floor economy</small></h1>
+</header>
+<div class="wrap">
+  <div class="bar" id="tools"></div>
+  <p id="stats"></p>
+  <div id="screen"><pre id="scr"></pre></div>
+  <div id="msg"></div>
+  <details open><summary>CHARTS & BOT</summary>
+    <div class="bar" style="margin-top:8px"><button id="runBot">Run bot analysis (instant)</button><label><input type="checkbox" id="autoBuy"> live auto-buy bot (watch it play with ⏩ 20×/100×)</label></div>
+    <pre class="rep" id="chart"></pre>
+    <pre class="rep" id="report">press “Run bot analysis” to estimate time-to-win and the profit curve for the current tuning.</pre>
+  </details>
+  <details open><summary>TUNING — change a value, then “Apply &amp; restart”</summary>
+    <div class="grid" id="globals"></div>
+    <table id="stagesTbl"></table>
+    <div class="bar"><button id="apply">Apply &amp; restart</button><button id="defaults">Reset to defaults</button><button id="copy">Show config to paste into the main game</button></div>
+    <textarea id="cfg" style="display:none" readonly></textarea>
+  </details>
+  <p><small>Click a machine on the floor to upgrade it. Nothing marks the bottleneck: watch the piles. Profit/s = lemons sold per second × what each lemon sells for. Efficiency = lemons sold ÷ lemons taken in, times output ÷ target.</small></p>
+</div>
+
+<script>
+'use strict';
+const W = 100, H = 28;
+const ch = new Array(W * H), co = new Array(W * H);
+const scr = document.getElementById('scr');
+
+/* ======================================================================
+   TUNABLE PARAMETERS  (edit in the page; these are the defaults)
+   ====================================================================== */
+const DEFAULT_P = {
+  startCoins: 3000,       // coins you walk onto the floor with
+  bonusLevel2: 1,         // 1 = Pasteurizer and Final QC are installed at Lv 2 (free bonus with their first upgrade)
+  target: 3.0,            // lemons/s needed for 100% efficiency
+  hold: 20,               // seconds you must hold 100% to win
+  queueCap: 12,           // lemons a pile holds before extras spill
+  price: 1.0,             // multiplier on what a lemon sells for (sum of stage values × price)
+  proc: 0.0,              // processing cost per lemon, as a fraction of stage value (0 = none, so profit never drops when you upgrade)
+  spill: 0.0,             // extra coins lost per spilled lemon (0 = spilled lemons only hurt efficiency)
+  smallGrowth: 1.28,      // each small level multiplies the stage's speed by this (profit grows exponentially)
+  smallCost: 1.20,        // each small level costs this × the previous (≈ the speed growth, so each upgrade pays back in about the same time)
+  machCost: 1.6,          // each extra machine (motor / vat) costs this × the previous
+  costScale: 1.0,         // multiplies every cost
+};
+const DEFAULT_D = [   // per stage: value (what it adds to each lemon's price), kind, r0 (speed at Lv 1 / per machine), n (levels), c0 (cost of Lv 1)
+  { id: 'inspect',  name: 'INSPECT',  title: 'Inspection',  up: '🤖 Auto-Inspector',  value: 1.0, kind: 'small',    r0: 0.20, n: 12, c0: 15,  inst: 'Install auto-inspector', label: 'Faster belt' },
+  { id: 'grind',    name: 'GRIND',    title: 'Grinder',     up: '⚡ Auto-Grinder',    value: 1.5, kind: 'machines', r0: 0.80, n: 4, c0: 60,  inst: 'Install first motor',   noun: 'motor' },
+  { id: 'macerate', name: 'MACERATE', title: 'Maceration',  up: '🛢 Maceration Vats', value: 1.0, kind: 'machines', r0: 0.85, n: 4, c0: 100, inst: 'Install first vat',     noun: 'vat' },
+  { id: 'press',    name: 'PRESS',    title: 'Press',       up: '🗜 Hydraulic Press', value: 2.5, kind: 'small',    r0: 0.23, n: 12, c0: 80, inst: 'Install hydraulic press', label: 'More force' },
+  { id: 'pasteur',  name: 'PASTEUR',  title: 'Pasteurizer', up: '♨ Heat Exchanger',   value: 2.0, kind: 'small',    r0: 0.245, n: 12, c0: 110, inst: 'Install heat exchanger', label: 'Faster conveyor' },
+  { id: 'qc',       name: 'FINAL QC', title: 'Final QC',    up: '🔬 Auto-QC Lab',     value: 3.0, kind: 'small',    r0: 0.26, n: 12, c0: 150, inst: 'Install QC lab',        label: 'Faster assays' },
+];
+let P = Object.assign({}, DEFAULT_P), D = JSON.parse(JSON.stringify(DEFAULT_D));
+try { const sv = JSON.parse(localStorage.getItem('lemonFloorProto.v1') || 'null'); if (sv){ P = Object.assign(P, sv.P); D = sv.D || D; } } catch (e) {}
+
+/* ---------- build the stage table from the parameters ---------- */
+let STAGES = [], TARGET = 3, HOLD_TO_WIN = 20, QUEUE_CAP = 12, PLANNED = [];
+const small = (d) => Array.from({ length: d.n }, (_, i) => ({ kind: i ? 'small' : 'auto', name: i ? `${d.label} +${i}` : d.inst, rate: +(d.r0 * Math.pow(P.smallGrowth, i)).toFixed(3), cost: Math.round(P.costScale * d.c0 * Math.pow(P.smallCost, i)), count: 1 }));
+const machines = (d) => Array.from({ length: d.n }, (_, i) => ({ kind: i ? 'big' : 'auto', name: i ? `Add ${d.noun} #${i + 1}` : d.inst, rate: +(d.r0 * (i + 1)).toFixed(3), cost: Math.round(P.costScale * d.c0 * Math.pow(P.machCost, i)), count: i + 1 }));
+function buildStages(){
+  TARGET = P.target; HOLD_TO_WIN = P.hold; QUEUE_CAP = P.queueCap;
+  STAGES = D.map(d => ({ id: d.id, name: d.name, title: d.title, value: d.value, upgrade: { title: d.up, levels: d.kind === 'machines' ? machines(d) : small(d) } }));
+}
+
+/* ---------- ASCII engine ---------- */
+function clear(){ ch.fill(' '); co.fill(''); }
+function put(x, y, s, c = 't'){
+  x = Math.floor(x); y = Math.floor(y);
+  if (y < 0 || y >= H) return;
+  for (let i = 0; i < s.length; i++){
+    const xx = x + i;
+    if (xx < 0 || xx >= W || s[i] === ' ') continue;
+    ch[y * W + xx] = s[i]; co[y * W + xx] = c;
+  }
+}
+function box(x, y, w, h, c = 's', dbl = false){
+  const [tl,tr,bl,br,hz,vt] = dbl ? '╔╗╚╝═║' : '┌┐└┘─│';
+  put(x, y, tl + hz.repeat(Math.max(0, w - 2)) + tr, c); put(x, y + h - 1, bl + hz.repeat(Math.max(0, w - 2)) + br, c);
+  for (let j = 1; j < h - 1; j++){ put(x, y + j, vt, c); put(x + w - 1, y + j, vt, c); }
+}
+function belt(x1, x2, y, T, speed = 5, c = 's'){
+  const sh = Math.floor(T * 6 * (speed / 5));
+  for (let x = x1; x <= x2; x++){
+    const m = (((x - sh) % 4) + 4) % 4;
+    put(x, y, m === 0 ? '›' : '═', c);
+    if (m === 2) put(x, y + 1, '·', 'd');
+  }
+  put(x1 - 1, y, '(', c); put(x2 + 1, y, ')', c);
+}
+function man(x, y, c = 'k'){ put(x, y, ' O ', c); put(x, y + 1, '/|\\', c); put(x, y + 2, '/ \\', c); }
+function blink(T, r = 3){ return Math.floor(T * r) % 2 === 0; }
+const esc = c => c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '&' ? '&amp;' : c;
+function render(){
+  const out = [];
+  for (let y = 0; y < H; y++){
+    let line = '', cur = null, buf = '';
+    for (let x = 0; x < W; x++){
+      const c = co[y * W + x] || 't';
+      if (c !== cur){ if (buf) line += `<span class="${cur}">${buf}</span>`; cur = c; buf = ''; }
+      buf += esc(ch[y * W + x]);
+    }
+    line += `<span class="${cur}">${buf}</span>`;
+    out.push(line);
+  }
+  scr.innerHTML = out.join('\n');
+}
+function fit(){
+  const wpx = document.getElementById('screen').clientWidth - 20;
+  scr.style.fontSize = Math.max(6, Math.min(24, wpx / (W * 0.602))) + 'px';
+}
+window.addEventListener('resize', fit);
+
+
+/* ======================================================================
+   GAME MODEL
+   ====================================================================== */
+let G, T = 0, msgT = 0, speed = 1, paused = false, shopKey = '';
+const stageOf = id => STAGES.find(s => s.id === id);
+const stageIdx = id => STAGES.findIndex(s => s.id === id);
+const lvl = id => G.lvl[id] || 0;
+const maxLvl = id => stageOf(id).upgrade.levels.length;
+const rateAt = (id, l) => l > 0 ? stageOf(id).upgrade.levels[l - 1].rate : 0;
+const lvlData = (id, l) => stageOf(id).upgrade.levels[l - 1];
+const rateOf = id => rateAt(id, lvl(id));
+const automated = id => lvl(id) > 0;
+const cumValue = i => P.price * STAGES.slice(0, i + 1).reduce((a, s) => a + s.value, 0);
+const plainName = t => t.replace(/^\S+\s/, '');
+const fmtT = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const setView = () => {};
+function say(s){ document.getElementById('msg').textContent = s; msgT = 7; }
+function startLevels(){ const lv = {}; STAGES.forEach(s => lv[s.id] = 1); if (P.bonusLevel2){ lv.pasteur = 2; lv.qc = 2; } return lv; }
+function newGame(){
+  buildStages();
+  G = { coins: P.startCoins, lvl: startLevels(), unlocked: {}, lost: 0, won: false, winT: null, t: 0, bought: 0, hist: [], lastHist: 0, marks: {}, log: [] };
+  STAGES.forEach(s => G.unlocked[s.id] = true);
+  Object.assign(SIM, { buf: {}, out: {}, util: {}, spill: {}, intake: 0, sold: 0, income: 0, eff: 0, hold: 0 });
+  SIM.income = steady().profit;
+  FXS.length = 0; G.p0 = Math.max(.01, SIM.income);
+}
+/* ---------- production-line simulation ----------
+   Automated stages form a chain from stage 1. Every stage processes lemons from the
+   pile in front of it. If the pile in front of the NEXT stage is full, the lemons
+   spill and are lost (their processing cost is already spent).                    */
+const SIM = { buf: {}, out: {}, util: {}, spill: {}, intake: 0, sold: 0, income: 0, eff: 0, hold: 0 };
+const procCost = s => P.proc * s.value;
+function steady(levels = G.lvl){           // closed-form steady state for a set of levels (also used for offline income)
+  const c = []; for (const s of STAGES){ if (!(levels[s.id] > 0)) break; c.push(s); }
+  if (!c.length) return { chain: c, sold: 0, intake: 0, profit: 0, eff: 0, bott: -1, spills: [] };
+  const r = c.map(s => rateAt(s.id, levels[s.id])); let f = r[0], cost = r[0] * procCost(c[0]), b = 0; const spills = [0];
+  r.forEach((v, i) => { if (v < r[b]) b = i; });
+  for (let i = 1; i < c.length; i++){ spills[i] = Math.max(0, f - r[i]); f = Math.min(f, r[i]); cost += f * procCost(c[i]) + spills[i] * P.spill; }
+  const profit = f * cumValue(c.length - 1) - cost;
+  return { chain: c, sold: f, intake: r[0], profit, eff: Math.min(1, f / r[0]) * Math.min(1, f / TARGET), bott: b, spills };
+}
+const chain = () => steady().chain;
+function lineStats(){ const t = steady(); return { chain: t.chain, rate: t.sold, income: t.profit, bott: t.bott }; }
+function simStep(dt){
+  G.t += dt;
+  const c = chain(), a = 1 - Math.exp(-dt / 3), a1 = 1 - Math.exp(-dt / 1.2);
+  let sold = 0, intake = 0, cost = 0, rev = 0;
+  STAGES.forEach(s => { if (!c.includes(s)){ SIM.buf[s.id] = 0; SIM.util[s.id] = 0; SIM.out[s.id] = 0; SIM.spill[s.id] = 0; } });
+  c.forEach((s, i) => {
+    const want = rateOf(s.id) * dt, done = i === 0 ? want : Math.min(want, SIM.buf[s.id] || 0), nxt = c[i + 1];
+    if (i > 0) SIM.buf[s.id] -= done; else intake = done;
+    cost += done * procCost(s);
+    let spilled = 0;
+    if (nxt){ const room = Math.max(0, QUEUE_CAP - (SIM.buf[nxt.id] || 0)), push = Math.min(done, room); SIM.buf[nxt.id] = (SIM.buf[nxt.id] || 0) + push; spilled = done - push; G.lost += spilled; cost += spilled * P.spill; }
+    else { sold = done; rev = done * cumValue(i); }
+    SIM.util[s.id] = (SIM.util[s.id] || 0) + ((want > 0 ? done / want : 0) - (SIM.util[s.id] || 0)) * a1;
+    SIM.out[s.id] = (SIM.out[s.id] || 0) + (done / dt - (SIM.out[s.id] || 0)) * a1;
+    SIM.spill[s.id] = (SIM.spill[s.id] || 0) + (spilled / dt - (SIM.spill[s.id] || 0)) * a1;
+  });
+  G.coins = Math.max(0, G.coins + rev - cost);
+  SIM.intake += (intake / dt - SIM.intake) * a; SIM.sold += (sold / dt - SIM.sold) * a; SIM.income += ((rev - cost) / dt - SIM.income) * a;
+  const yld = SIM.intake > .02 ? Math.min(1, SIM.sold / SIM.intake) : 0;
+  SIM.eff = yld * Math.min(1, SIM.sold / TARGET);
+  if (c.length === STAGES.length && SIM.eff >= .985) SIM.hold += dt; else SIM.hold = Math.max(0, SIM.hold - dt * 2);
+  if (SIM.hold >= HOLD_TO_WIN && !G.won){ G.won = true; G.winT = G.t; say('★ 100% EFFICIENCY! Factory optimized at ' + fmtT(G.t) + ' of play.'); }
+}
+
+
+function buy(id){
+  const l = lvl(id); if (l >= maxLvl(id)) return;
+  const nx = lvlData(id, l + 1); if (G.coins < nx.cost) return;
+  G.coins -= nx.cost; G.lvl[id] = l + 1; G.bought++;
+  FXS.push({ i: stageIdx(id), kind: nx.kind, t: 0 });
+  G.log.push([G.t, nx.name]);
+  say(`${nx.kind === 'big' ? '★' : '▲'} ${nx.name}`);
+}
+
+/* ======================================================================
+   OVERVIEW  (the factory floor: physical belts, piles and spills — no hints)
+   ====================================================================== */
+const MX = i => 3 + i * 15, BELT_Y = 17, FXS = [];
+let HOVER = -1;
+const DIG = {
+  '0': ['█████', '█   █', '█   █', '█   █', '█████'], '1': ['  █  ', ' ██  ', '  █  ', '  █  ', ' ███ '],
+  '2': ['█████', '    █', '█████', '█    ', '█████'], '3': ['█████', '    █', ' ████', '    █', '█████'],
+  '4': ['█   █', '█   █', '█████', '    █', '    █'], '5': ['█████', '█    ', '█████', '    █', '█████'],
+  '6': ['█████', '█    ', '█████', '█   █', '█████'], '7': ['█████', '    █', '   █ ', '  █  ', '  █  '],
+  '8': ['█████', '█   █', '█████', '█   █', '█████'], '9': ['█████', '█   █', '█████', '    █', '█████'],
+  '%': ['██  █', '██ █ ', '  █  ', ' █ ██', '█  ██'],
+};
+function bigText(str, x, y, c){ [...str].forEach((d, k) => DIG[d].forEach((row, r) => put(x + k * 6, y + r, row, c))); }
+const nextLevel = s => lvl(s.id) < maxLvl(s.id) ? lvlData(s.id, lvl(s.id) + 1) : null;
+
+function ovGauge(){
+  const e = SIM.eff, full = e >= .985, pct = e >= .995 ? 100 : Math.floor(e * 100), col = full ? 'g' : 'y';
+  box(2, 2, 96, 9, full ? 'g' : 'h', true); put(4, 2, ' LINE EFFICIENCY ', full ? 'g' : 'h');
+  const dx = 5 + (3 - String(pct).length) * 3; bigText(String(pct), dx, 4, col); put(dx + String(pct).length * 6, 7, '%', col); put(dx + String(pct).length * 6, 8, 'eff', 'd');
+  const bx = 32, bw = 62, n = Math.round(Math.min(1, e) * bw);
+  for (let r = 4; r <= 6; r++){ put(bx, r, '█'.repeat(n), col); put(bx + n, r, '░'.repeat(bw - n), 'd'); }
+  [25, 50, 75, 100].forEach(q => { const x = bx + Math.round(q / 100 * (bw - 1)); put(x, 7, '▲', 's'); put(x - (q === 100 ? 8 : 1), 8, q === 100 ? '100% = WIN' : String(q), q === 100 ? 'h' : 'd'); });
+  if (SIM.hold > 0.05 || full){ const k = Math.min(10, Math.round(SIM.hold / HOLD_TO_WIN * 10)); put(bx, 3, `HOLD IT: [${'█'.repeat(k)}${'░'.repeat(10 - k)}] ${Math.floor(SIM.hold)}/${HOLD_TO_WIN}s`, 'g'); }
+  else put(bx, 3, 'reach 100% and hold it to win', 'd');
+}
+function ovMachine(i){
+  const s = STAGES[i], x = MX(i), l = lvl(s.id), ok = G.unlocked[s.id], auto = l > 0;
+  put(x, 12, `[${i + 1}] ${s.name}`, ok ? 't' : 'd');
+  box(x, 13, 10, 7, auto ? 's' : 'd');
+  if (!ok){ put(x + 2, 16, '? ? ?', 'd'); return; }
+  if (!auto){ put(x + 2, 15, 'MANUAL', 'h'); put(x + 1, 17, 'click to', 'd'); put(x + 1, 18, 'learn it', 'd'); return; }
+  const d = lvlData(s.id, l), act = SIM.util[s.id] || 0, run = act > .12, f = run ? Math.floor(T * (2 + rateOf(s.id) * 2.2)) : 0, cnt = d.count || 1;
+  const mod3 = (k, f_) => (((k - f_) % 3) + 3) % 3;
+  if (s.id === 'inspect'){
+    put(x + 1, 14, '╔══════╗', 's'); put(x + 1, 15, '║' + (run ? (f % 2 ? ' ◉  ◉ ' : ' ◎  ◎ ') : ' -  - ') + '║', 'k');
+    if (run) put(x + 3, 16, f % 2 ? '╲││╱' : ' ╲╱ ', 'y');
+  } else if (s.id === 'grind'){
+    for (let k = 0; k < 4; k++) put(x + 1 + (k % 2) * 4, 14 + Math.floor(k / 2), `[${k < cnt ? '+x'[(f + k) % 2] : ' '}]`, k < cnt ? 'k' : 'd');
+    if (run) put(x + 1, 16, '░▒░▒░▒░▒', 'm');
+  } else if (s.id === 'macerate'){
+    for (let k = 0; k < 4; k++) put(x + 1 + (k % 2) * 4, 14 + Math.floor(k / 2), k < cnt ? `(${'▒°▒o'[(f + k) % 4]})` : '( )', k < cnt ? 'm' : 'd');
+    if (run) put(x + 1, 16, f % 2 ? '≈~≈~≈~≈~' : '~≈~≈~≈~≈', 'm');
+  } else if (s.id === 'press'){
+    const pr = 14 + (f % 3);
+    for (let r = 14; r <= 16; r++){ if (r === pr) put(x + 1, r, '▓▓▓▓▓▓▓▓', 'k'); else if (r < pr) put(x + 4, r, '║║', 's'); else put(x + 1, r, '░▒░▒░▒░▒', 'm'); }
+  } else if (s.id === 'pasteur'){
+    if (run) put(x + 1 + (f % 6), 14, '~', 'k');
+    put(x + 1, 15, '▒▒▒▒', 'r'); put(x + 5, 15, '░░░░', 'wd');
+    let cv = ''; for (let k = 0; k < 8; k++) cv += mod3(k, f) === 0 ? '›' : '─'; put(x + 1, 16, cv, 'k');
+  } else if (s.id === 'qc'){
+    [[1, 14], [5, 14], [3, 15]].forEach(([dx, dy], k) => put(x + dx, dy, `[${k < cnt ? (run && (f + k) % 3 === 0 ? 'v' : ' ') : ' '}]`, k < cnt ? 'k' : 'd'));
+    if (run) put(x + 1, 16, '·:·:·:·:', 'y');
+  }
+  let cv = ''; for (let k = 0; k < 8; k++) cv += mod3(k, f) === 0 ? '›' : '═'; put(x + 1, BELT_Y, cv, 's');
+  if (!run) put(x + 4, 15 + (s.id === 'grind' || s.id === 'macerate' ? 2 : 0), 'zz', 'd');
+  s.upgrade.levels.forEach((lv_, k) => put(x + k, 20, k < l ? (lv_.kind === 'big' ? '◆' : '●') : (lv_.kind === 'big' ? '◇' : '○'), k < l ? 'h' : 'd'));
+  const nx = nextLevel(s);
+  put(x + 1, 21, nx ? `▲${nx.cost}¢` : 'MAX', nx ? (G.coins >= nx.cost ? 'g' : 'd') : 'd');
+}
+function ovDraw(){
+  put(3, 1, 'COINS', 'd'); put(9, 1, String(Math.floor(G.coins)).padEnd(7), 'h'); put(24, 1, `profit ${SIM.income >= 0 ? '+' : ''}${SIM.income.toFixed(1)}/s`, 'g');
+  ovGauge();
+  const c = chain();
+  for (let i = 0; i < STAGES.length; i++) ovMachine(i);
+  // belts between machines, piles in front of each machine, spills falling off the belt
+  for (let i = 0; i < STAGES.length - 1; i++){
+    const x1 = MX(i) + 10, x2 = MX(i + 1) - 1, s = STAGES[i], nx = STAGES[i + 1], inChain = c.includes(s) && c.includes(nx);
+    belt(x1, x2, BELT_Y, T, 2 + (SIM.out[s.id] || 0) * 2, inChain ? 's' : 'd');
+    if (inChain){
+      const out = SIM.out[s.id] || 0, n = Math.min(3, Math.round(out * 1.3));
+      for (let k = 0; k < n; k++) put(x1 + ((T * 6 + k * 5 / n) % 5), BELT_Y, 'o', 'a');
+      const cells = Math.round(Math.min(1, (SIM.buf[nx.id] || 0) / QUEUE_CAP) * 15);
+      for (let k = 0; k < cells; k++) put(x2 - (k % 5), 16 - Math.floor(k / 5), (k + i) % 3 ? 'O' : 'o', (k + i) % 4 ? 'a' : 'ad');
+      const sp = SIM.spill[s.id] || 0;
+      for (let k = 0; k < Math.min(4, Math.ceil(sp * 1.5)); k++){ const yy = 18 + ((T * 7 + k * 1.7) % 5); put(x1 + (k % 2) * 2, yy, yy < 21 ? 'o' : '.', yy < 21 ? 'a' : 'd'); }
+    } else if (c.includes(s)) put(x1 + 1, 16, '►$', 'g');
+  }
+  const last = STAGES[STAGES.length - 1];
+  if (c.includes(last)){ const x1 = MX(5) + 10; belt(x1, x1 + 4, BELT_Y, T, 2 + (SIM.out[last.id] || 0) * 2, 's'); put(x1 + 5, 15, '┌──┐', 'h'); put(x1 + 5, 16, '│$$│', 'g'); put(x1 + 5, 17, '└──┘', 'h'); }
+  else if (c.includes(STAGES[c.length - 1]) && c.length === STAGES.length - 0) { /* no-op */ }
+  // upgrade effects: sparkle bursts for big upgrades, speed lines for small ones
+  FXS.forEach(fx => {
+    const x = MX(fx.i), a = fx.t;
+    if (fx.kind !== 'small'){
+      if (blink(T, 8)) box(x - 1, 12, 12, 9, 'h', true);
+      for (let k = 0; k < 9; k++) put(x - 1 + ((k * 7) % 12), 12 + ((k * 5 + Math.floor(T * 6)) % 9), '✦*·+'[(k + Math.floor(T * 8)) % 4], 'h');
+      put(x - 1, 11, fx.kind === 'auto' ? '★ ONLINE! ★' : '★ NEW MACHINE ★', 'h');
+    } else {
+      for (let r = 14; r <= 16; r++) put(x + ((T * 24 + r * 3) % 9), r, '≫', 'y');
+      put(x, 11, '▲ SPEED UP! ▲', 'y');
+    }
+  });
+  if (G.won && blink(T, 2)) put(22, 11, '★ ★ ★  OPTIMIZED: 100% EFFICIENCY — YOU WIN!  ★ ★ ★', 'g');
+  // hover help + lost counter
+  const hs = HOVER >= 0 ? STAGES[HOVER] : null;
+  if (hs && G.unlocked[hs.id]){
+    const nx = nextLevel(hs), cur = lvl(hs.id) > 0 ? lvlData(hs.id, lvl(hs.id)) : null;
+    put(3, 25, !lvl(hs.id) ? `${hs.title}: you run this by hand — master it, then automate.` : nx ? `${nx.name}  ·  ${nx.kind === 'big' ? 'big upgrade' : 'small upgrade'}  ·  about +${Math.round((nx.rate / cur.rate - 1) * 100)}% speed  ·  ${nx.cost}¢` : `${hs.title} is fully upgraded.`, 'h');
+  } else put(3, 25, 'click a machine to upgrade it  ·  watch where the lemons pile up, and where they fall', 'd');
+  put(3, 26, `lemons lost: ${Math.floor(G.lost)}`, G.lost > 0 ? 's' : 'd');
+}
+function ovHit(cx, cy){
+  if (cy < 11.5 || cy > 22.5) return -1;
+  for (let i = 0; i < STAGES.length; i++) if (cx >= MX(i) - 1 && cx <= MX(i) + 10) return i;
+  return -1;
+}
+function ovClick(cx, cy){
+  const i = ovHit(cx, cy); if (i < 0 || !G.unlocked[STAGES[i].id]) return;
+  buy(STAGES[i].id);
+}
+
+
+/* ======================================================================
+   BOT (greedy: best profit-and-efficiency gain per coin) + analysis
+   ====================================================================== */
+function botPick(lv, coins){
+  const st = steady(lv), c = [];
+  STAGES.forEach(s => { const l = lv[s.id]; if (l >= s.upgrade.levels.length) return; const nl = Object.assign({}, lv, { [s.id]: l + 1 }), n = steady(nl), cost = s.upgrade.levels[l].cost;
+    c.push({ id: s.id, cost, name: s.upgrade.levels[l].name, score: ((n.profit - st.profit) + 30 * (n.eff - st.eff)) / cost }); });
+  if (!c.length) return null;
+  let pick = c.filter(x => x.score > 1e-9).sort((a, b) => b.score - a.score)[0];
+  if (!pick){ const r = STAGES.map(s => rateAt(s.id, lv[s.id])), mr = Math.min(...r); pick = c.filter(x => Math.abs(rateAt(x.id, lv[x.id]) - mr) < 1e-9).sort((a, b) => a.cost - b.cost)[0] || c.sort((a, b) => a.cost - b.cost)[0]; }
+  return pick;
+}
+function runBot(){
+  buildStages(); let lv = startLevels(), coins = P.startCoins, t = 0, g = 0; const pts = [[0, steady(lv).profit, steady(lv).eff, 'start']];
+  while (g++ < 400){
+    const st = steady(lv); if (st.eff >= .999) break;
+    const pick = botPick(lv, coins); if (!pick) break;
+    let w = 0; while (coins < pick.cost && w++ < 1e4){ const pr = Math.max(.05, steady(lv).profit); const dt = Math.max(.1, (pick.cost - coins) / pr); t += dt; coins += pr * dt; }
+    coins -= pick.cost; lv[pick.id]++; const n = steady(lv); pts.push([t, n.profit, n.eff, pick.name]);
+  }
+  const fin = steady(lv), total = t + P.hold, first = pts[0][1], out = [];
+  out.push(`BOT RESULT  win at ≈ ${fmtT(total)}  (${pts.length - 1} upgrades, ends at ${(fin.profit).toFixed(1)} coins/s, efficiency ${Math.round(fin.eff * 100)}%)`);
+  out.push(`profit grows ×${(fin.profit / Math.max(.01, first)).toFixed(1)} over the run (${first.toFixed(1)} → ${fin.profit.toFixed(1)}/s)`);
+  const dbl = []; for (let k = 1; k <= 6; k++){ const p = pts.find(q => q[1] >= first * Math.pow(2, k)); if (p) dbl.push(`×${Math.pow(2, k)} at ${fmtT(p[0])}`); }
+  out.push('profit doubling milestones: ' + (dbl.join('  ·  ') || 'none'));
+  const ratios = []; for (let i = 1; i < pts.length; i++) if (pts[i][1] > 0 && pts[i - 1][1] > 0) ratios.push(pts[i][1] / pts[i - 1][1]);
+  const dips = pts.filter((q, i) => i && q[1] < pts[i - 1][1] - 1e-9).length;
+  out.push(`upgrades that LOWERED profit: ${dips}   ·   avg profit gain per upgrade ×${(ratios.reduce((a, b) => a + b, 0) / Math.max(1, ratios.length)).toFixed(2)}`);
+  out.push('');
+  out.push('  time    profit/s   eff    upgrade bought');
+  pts.forEach((q, i) => { if (i === 0 || i % 3 === 0 || i === pts.length - 1) out.push(`${fmtT(q[0]).padStart(6)}  ${q[1].toFixed(1).padStart(8)}  ${String(Math.round(q[2] * 100)).padStart(3)}%   ${q[3]}`); });
+  document.getElementById('report').textContent = out.join('\n');
+}
+
+/* ---------- UI ---------- */
+const tools = document.getElementById('tools');
+function renderTools(){
+  tools.innerHTML = '';
+  const mk = (txt, fn, on) => { const b = document.createElement('button'); b.textContent = txt; if (on) b.className = 'on'; b.onclick = fn; tools.appendChild(b); };
+  const lab = t => { const s = document.createElement('span'); s.className = 'lbl'; s.textContent = t; tools.appendChild(s); };
+  lab('Speed:'); [1, 5, 20, 100].forEach(v => mk(v + '×', () => { speed = v; renderTools(); }, speed === v && !paused));
+  mk(paused ? '▶ Play' : '⏸ Pause', () => { paused = !paused; renderTools(); }, false);
+  mk('↺ Restart', () => { newGame(); renderTools(); say('Restarted.'); }, false);
+  lab('Cheat:'); [500, 5000].forEach(v => mk('+' + v + '¢', () => { G.coins += v; }, false));
+}
+const GL = [['startCoins', 'Start coins'], ['bonusLevel2', 'Pasteur+QC start Lv2 (1/0)'], ['target', 'Target lemons/s'], ['hold', 'Hold-to-win secs'], ['queueCap', 'Pile size (spill)'], ['price', 'Price multiplier'], ['proc', 'Processing cost (× value)'], ['spill', 'Spill penalty ¢/lemon'], ['smallGrowth', 'Small level speed ×'], ['smallCost', 'Small level cost ×'], ['machCost', 'Machine cost ×'], ['costScale', 'All costs ×']];
+function renderForm(){
+  const g = document.getElementById('globals'); g.innerHTML = '';
+  GL.forEach(([k, l]) => { const lb = document.createElement('label'); lb.textContent = l; const i = document.createElement('input'); i.type = 'number'; i.step = 'any'; i.value = P[k]; i.dataset.k = k; lb.appendChild(i); g.appendChild(lb); });
+  const t = document.getElementById('stagesTbl'); t.innerHTML = '<tr><th>stage</th><th>value</th><th>speed at Lv1</th><th>levels</th><th>cost of Lv1</th><th>kind</th></tr>';
+  D.forEach((d, idx) => { const tr = document.createElement('tr'); tr.innerHTML = `<td>${d.title}</td>` + ['value', 'r0', 'n', 'c0'].map(k => `<td><input type="number" step="any" data-d="${idx}" data-k="${k}" value="${d[k]}"></td>`).join('') + `<td>${d.kind === 'machines' ? 'machines (N×)' : 'small steps'}</td>`; t.appendChild(tr); });
+}
+function readForm(){
+  document.querySelectorAll('#globals input').forEach(i => P[i.dataset.k] = +i.value);
+  document.querySelectorAll('#stagesTbl input').forEach(i => D[+i.dataset.d][i.dataset.k] = +i.value);
+  try { localStorage.setItem('lemonFloorProto.v1', JSON.stringify({ P, D })); } catch (e) {}
+}
+document.getElementById('apply').onclick = () => { readForm(); newGame(); renderTools(); say('Applied tuning and restarted.'); };
+document.getElementById('defaults').onclick = () => { P = Object.assign({}, DEFAULT_P); D = JSON.parse(JSON.stringify(DEFAULT_D)); try { localStorage.removeItem('lemonFloorProto.v1'); } catch (e) {} renderForm(); newGame(); renderTools(); say('Defaults restored.'); };
+document.getElementById('runBot').onclick = () => { readForm(); runBot(); };
+document.getElementById('copy').onclick = () => {
+  readForm(); buildStages();
+  const t = `/* paste into lemonade_tycoon.html CONFIG */\nconst TARGET = ${P.target}, HOLD_TO_WIN = ${P.hold}, QUEUE_CAP = ${P.queueCap}, PROC = ${P.proc}, SPILL_COST = ${P.spill}, PRICE = ${P.price};\n/* floor start: coins ${P.startCoins}; Pasteurizer + Final QC start at Lv ${P.bonusLevel2 ? 2 : 1} */\nconst STAGES = ${JSON.stringify(STAGES, null, 1).replace(/\n\s+/g, ' ')};`;
+  const ta = document.getElementById('cfg'); ta.style.display = ''; ta.value = t; ta.select(); try { navigator.clipboard.writeText(t); } catch (e) {}
+};
+
+function draw(){
+  clear(); box(0, 0, W, H, 'd'); put(2, 0, ' FACTORY FLOOR · PROTOTYPE ', 'h'); ovDraw();
+}
+scr.addEventListener('pointerdown', e => { const r = scr.getBoundingClientRect(); ovClick((e.clientX - r.left) / (r.width / W), (e.clientY - r.top) / (r.height / H)); });
+scr.addEventListener('pointermove', e => { const r = scr.getBoundingClientRect(); HOVER = ovHit((e.clientX - r.left) / (r.width / W), (e.clientY - r.top) / (r.height / H)); });
+scr.addEventListener('pointerleave', () => { HOVER = -1; });
+
+/* ---------- live charts / stats ---------- */
+function updateStats(){
+  const L = lineStats();
+  document.getElementById('stats').innerHTML = `time <b>${fmtT(G.t)}</b> · upgrades bought <b>${G.bought}</b> · profit <b>${SIM.income.toFixed(1)}</b>/s (×${(SIM.income / G.p0).toFixed(1)} vs start) · sold <b>${SIM.sold.toFixed(2)}</b> lemons/s · efficiency <b>${Math.round(SIM.eff * 100)}%</b>` + (G.winT !== null ? ` · <b>WON at ${fmtT(G.winT)}</b>` : '');
+  const h = G.hist; if (h.length > 1){
+    const lg = h.map(v => Math.log(Math.max(.01, v))), mn = Math.min(...lg), mx = Math.max(...lg), SP = '▁▂▃▄▅▆▇█';
+    document.getElementById('chart').textContent = 'profit/s over time (log scale, one mark = 2 s)\n' + lg.map(v => SP[Math.min(7, Math.floor((v - mn) / Math.max(.001, mx - mn) * 7.99))]).join('') + `\nlow ${Math.exp(mn).toFixed(1)} → high ${Math.exp(mx).toFixed(1)} coins/s     ` + 'a straight rising line on a log scale = exponential growth';
+  }
+}
+
+/* ---------- loop ---------- */
+buildStages(); newGame(); fit(); renderForm(); renderTools();
+let last = performance.now(), acc = 0, statT = 0, botT = 0;
+function frame(now){
+  const dt = Math.min(.1, (now - last) / 1000); last = now; T += dt;
+  if (!paused){
+    let sim = dt * speed;
+    while (sim > 0){ const s = Math.min(.1, sim); simStep(s); sim -= s;
+      if (G.t - G.lastHist >= 2){ G.lastHist = G.t; G.hist.push(SIM.income); if (G.hist.length > 120) G.hist.shift(); }
+      if (document.getElementById('autoBuy').checked && (botT += s) > .4){ botT = 0; const pk = botPick(G.lvl, G.coins); if (pk && G.coins >= pk.cost) buy(pk.id); } }
+  }
+  FXS.forEach(f => f.t += dt); while (FXS.length && FXS[0].t > 1.8) FXS.shift();
+  if (msgT > 0 && (msgT -= dt) <= 0) document.getElementById('msg').textContent = '';
+  acc += dt; if (acc >= 1 / 20){ acc = 0; draw(); render(); }
+  statT += dt; if (statT > .5){ statT = 0; updateStats(); }
+  requestAnimationFrame(frame);
+}
+window.__P = { get D(){ return D; }, get G(){ return G; }, SIM, steady, buy, newGame, runBot, botPick, get P(){ return P; }, get STAGES(){ return STAGES; } };
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
