@@ -826,10 +826,10 @@ function buy(id, viaFloor = false){
     if (floorOpen() && !G.floorGift){
       G.floorGift = true; G.coins += FLOOR_START_COINS; G.valve = VALVE_START;
       if (lvl('inspect') < FLOOR_INSPECT_LEVEL){ G.lvl.inspect = FLOOR_INSPECT_LEVEL; G.m.inspect = { p: 100, done: true }; FXS.push({ i: 0, kind: 'small', t: 0 }); }
-      msg += ` 🏭 THE LINE IS COMPLETE! Investors give you ${FLOOR_START_COINS} coins and upgrade Inspection to Lv ${FLOOR_INSPECT_LEVEL}. Click the flashing Factory Floor tab.`;
+      msg += ` 🏭 THE LINE IS COMPLETE! Investors give you ${FLOOR_START_COINS} coins and upgrade Inspection to Lv ${FLOOR_INSPECT_LEVEL}. Welcome to the Factory Floor!`;
     }
     say(msg);
-    if (!viaFloor && view === id && nxt && !floorOpen()) setView(nxt.id);       // move on to the process you just unlocked
+    if (!viaFloor && view === id){ const dest = floorOpen() ? 'overview' : (nxt && nxt.id); if (dest) setView(dest); }       // move on to the process you just unlocked (or the factory floor after the last one)
   } else if (PER_LEVEL_MASTERY[id] && !viaFloor && l + 1 < maxLvl(id)) say(`${nx.kind === 'big' ? '★' : '▲'} ${nx.name} — master the harder belt to unlock the next level.`);
   else say(`${nx.kind === 'big' ? '★' : '▲'} ${nx.name}`);
   renderTabs(); shopKey = ''; save();
