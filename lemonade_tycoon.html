@@ -118,6 +118,7 @@ function box(x, y, w, h, c = 's', dbl = false){
   put(x, y, tl + hz.repeat(Math.max(0, w - 2)) + tr, c); put(x, y + h - 1, bl + hz.repeat(Math.max(0, w - 2)) + br, c);
   for (let j = 1; j < h - 1; j++){ put(x, y + j, vt, c); put(x + w - 1, y + j, vt, c); }
 }
+function clearRect(x, y, w, h){ for (let j = 0; j < h; j++) for (let i = 0; i < w; i++){ const xx = x + i, yy = y + j; if (xx >= 0 && xx < W && yy >= 0 && yy < H){ ch[yy * W + xx] = ' '; co[yy * W + xx] = ''; } } }
 function belt(x1, x2, y, T, speed = 5, c = 's'){
   const sh = Math.floor(T * 6 * (speed / 5));
   for (let x = x1; x <= x2; x++){
@@ -734,7 +735,7 @@ function draw(){
 }
 
 /* ---------- upgrade panel (drawn inside the main screen; click the BUY button) ---------- */
-const BUY_RECT = { x1: 2, x2: 97, y1: 23, y2: 26 };       // the whole yellow upgrade box is the button
+const BUY_RECT = { x1: 75, x2: 96, y1: 23, y2: 26 };      // the UPGRADE button at the right end of the panel
 function buyState(id, viaFloor = false){
   const l = lvl(id);
   if (l >= maxLvl(id)) return { ok: false, why: 'MAXED OUT' };
@@ -746,16 +747,18 @@ function buyState(id, viaFloor = false){
 }
 function upgradePanel(){
   const s = stageOf(view), l = lvl(s.id), n = maxLvl(s.id), nx = l < n ? lvlData(s.id, l + 1) : null, cur = l > 0 ? lvlData(s.id, l) : null, st = buyState(s.id);
-  box(2, 23, 96, 4, 'h'); put(4, 23, st.ok ? ' UPGRADE — click anywhere in this box ' : ' UPGRADE ', 'h');
+  box(2, 23, 96, 4, 'h'); put(4, 23, ' UPGRADE ', 'h');
   put(4, 24, plainName(s.upgrade.title), 't');
   s.upgrade.levels.forEach((lv_, k) => put(26 + k, 24, k < l ? (lv_.kind === 'big' ? '◆' : '●') : (lv_.kind === 'big' ? '◇' : '○'), k < l ? 'h' : 'd'));
   put(42, 24, `Lv ${l}/${n}`, 's');
   const pct = nx && cur ? Math.round((nx.rate / cur.rate - 1) * 100) : 0;
   put(4, 25, !nx ? 'Fully upgraded.' : l === 0 ? `${nx.name}: automates ${s.title} and unlocks the next process.` : `Next: ${nx.name} (${nx.kind === 'big' ? 'big upgrade' : 'small upgrade'}, about +${pct}% speed)`, 'd');
-  if (nx){
-    put(74, 24, st.ok ? `▶ BUY  ${st.cost}¢ ◀` : `  BUY  ${nx.cost}¢  `, st.ok ? (blink(T, 3) ? 'g' : 'h') : 'd');
-    put(74, 25, st.ok ? '  click to install' : ` ${st.why}`.slice(0, 22), st.ok ? 'g' : 'r');
-  } else put(74, 24, '   ★ MAX ★', 'h');
+  if (nx){                                                  // the UPGRADE button: a bordered box so it reads as a button
+    const col = st.ok ? (blink(T, 3) ? 'g' : 'h') : 'd';
+    clearRect(BUY_RECT.x1, 23, 22, 4); box(BUY_RECT.x1, 23, 22, 4, col, true);
+    put(BUY_RECT.x1 + 2, 24, st.ok ? `UPGRADE  ${st.cost}¢` : `UPGRADE  ${nx.cost}¢`, col);
+    put(BUY_RECT.x1 + 2, 25, st.ok ? 'click here' : st.why.slice(0, 19), st.ok ? 'g' : 'r');
+  } else { clearRect(BUY_RECT.x1, 23, 22, 4); box(BUY_RECT.x1, 23, 22, 4, 'h', true); put(BUY_RECT.x1 + 6, 24, '★ MAX ★', 'h'); }
 }
 
 /* ---------- tabs ---------- */
@@ -866,16 +869,20 @@ function setSpeed(v){ SPEED = v; try { localStorage.setItem('lemonTycoon.speed',
 document.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => setSpeed(+b.dataset.sp)); setSpeed(SPEED);
 let last = performance.now(), acc = 0, saveT = 0;
 function frame(now){
-  const dt = Math.min(.1, (now - last) / 1000); last = now;
-  T += dt;
-  { let rem = dt * SPEED; while (rem > 0){ const st = Math.min(.1, rem); simStep(st); rem -= st; } }
-  const m = MODS[view]; if (m.step) m.step(dt);
-  pops = pops.filter(p => (p.t += dt) < 1);
-  FXS.forEach(f => f.t += dt); while (FXS.length && FXS[0].t > 1.8) FXS.shift();
-  if (msgT > 0 && (msgT -= dt) <= 0) document.getElementById('msg').textContent = '';
-  acc += dt; saveT += dt;
-  if (acc >= 1 / 20){ acc = 0; draw(); render(); renderShop(); }
-  if (saveT > 5){ saveT = 0; save(); }
+  try {
+    const dt = Math.min(.1, (now - last) / 1000); last = now;
+    T += dt;
+    { let rem = dt * SPEED; while (rem > 0){ const st = Math.min(.1, rem); simStep(st); rem -= st; } }
+    const m = MODS[view]; if (m.step) m.step(dt);
+    pops = pops.filter(p => (p.t += dt) < 1);
+    FXS.forEach(f => f.t += dt); while (FXS.length && FXS[0].t > 1.8) FXS.shift();
+    if (msgT > 0 && (msgT -= dt) <= 0) document.getElementById('msg').textContent = '';
+    acc += dt; saveT += dt;
+    if (acc >= 1 / 20){ acc = 0; draw(); render(); renderShop(); }
+    if (saveT > 5){ saveT = 0; save(); }
+  } catch (err){                                            // never let one error stop the whole game loop
+    console.error(err); try { say('⚠ Internal error: ' + err.message + ' — the game keeps running'); } catch (e2) {}
+  }
   requestAnimationFrame(frame);
 }
 window.addEventListener('beforeunload', save);
