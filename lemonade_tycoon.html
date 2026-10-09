@@ -48,7 +48,7 @@
   <div id="screen"><pre id="scr"></pre></div>
   <div id="msg"></div>
   <div id="shopWrap" style="display:none"><h3 class="sec" id="shopT">UPGRADES</h3><div id="shop"></div></div>
-  <p id="ovHint"><small>Click a machine to upgrade it (or to open its job if you haven't learned it yet). Nothing tells you where the problem is: watch where the lemons pile up, and where they fall off the belt. Reach 100% efficiency and hold it to win.</small></p>
+  <p id="ovHint"><small>Click a machine to upgrade it. Click the hopper (or use the arrow keys) to turn the lemon valve up or down: every lemon you feed costs coins, and lemons that spill are wasted. Nothing tells you where the problem is: watch where the lemons pile up and where they fall off the belt. Reach 100% efficiency and hold it to win.</small></p>
   <p><small>Learn each job by hand. Mastery lets you buy its machine (Lv 1), which also unlocks the next job. Higher levels make that stage faster, but the whole line only runs as fast as its slowest stage: check the Overview tab for bottlenecks.</small></p>
 </div>
 
@@ -83,6 +83,7 @@ const TARGET = 3.0;            // lemons/s the line must deliver, with no waste,
 const HOLD_TO_WIN = 20;        // seconds you must hold 100% to win
 const QUEUE_CAP = 12;          // lemons a stage's input pile holds; extras spill and are lost for good
 const PROC = 0.0, SPILL_COST = 0.0, PRICE = 1.0;
+const LEMON_COST = 0.6, VALVE = [0.29, 0.51, 0.92, 1.65, 3.0], VALVE_START = 1;   // factory-floor hopper: coins per lemon fed, lemons/s at each of the 5 valve levels (level 5 = the target)
 const FLOOR_START_COINS = 3000, FLOOR_INSPECT_LEVEL = 3;   // on the factory floor Inspection starts at least at this level            // gift when the factory floor first opens
 const BONUS_LEVEL2 = ['pasteur', 'qc'];    // their first upgrade comes with Lv 2 free
 const SMALL_GROWTH = 1.28, SMALL_COST = 1.2, MACH_COST = 1.6, COST_SCALE = 1.0;
@@ -153,7 +154,7 @@ window.addEventListener('resize', fit);
    GLOBAL GAME MODEL  (shared by every stage)
    ====================================================================== */
 const KEY = 'lemonTycoon.v5';
-const freshState = () => ({ coins: 0, lost: 0, won: false, floorGift: false, lvl: {}, unlocked: { inspect: true }, seen: { inspect: true }, m: {}, sorted: 0, best: 0, grinds: 0, gbest: 0, t: Date.now() });
+const freshState = () => ({ coins: 0, lost: 0, won: false, floorGift: false, valve: 1, lvl: {}, unlocked: { inspect: true }, seen: { inspect: true }, m: {}, sorted: 0, best: 0, grinds: 0, gbest: 0, t: Date.now() });
 let G = freshState();
 try {
   let s = JSON.parse(localStorage.getItem(KEY) || 'null');
@@ -176,7 +177,7 @@ const mult = id => mastered(id) ? 1.5 : 1;                       // manual-play 
 const cumValue = i => PRICE * STAGES.slice(0, i + 1).reduce((a, s) => a + s.value, 0);
 const plainName = t => t.replace(/^\S+\s/, '');
 STAGES.forEach(s => { if ((G.lvl[s.id] || 0) > maxLvl(s.id)) G.lvl[s.id] = maxLvl(s.id); });
-G.lost = G.lost || 0; G.won = !!G.won;
+G.lost = G.lost || 0; G.won = !!G.won; G.valve = Math.max(1, Math.min(5, Math.round(G.valve || 1)));
 const floorOpen = () => STAGES.every(s => lvl(s.id) > 0);   // the factory floor opens once every stage is automated
 let T = 0, view = 'overview', pops = [], msgT = 0;
 function pop(x, y, text, col){ pops.push({ x, y, text, col, t: 0 }); }
@@ -194,30 +195,39 @@ function drawMastery(id, y){
 }
 
 /* ---------- production-line simulation ----------
-   Automated stages form a chain from stage 1. Every stage processes lemons from the
-   pile in front of it. If the pile in front of the NEXT stage is full, the lemons
-   spill and are lost (their processing cost is already spent).                    */
+   Automated stages form a chain from stage 1. Once EVERY stage is automated the factory floor opens and the
+   HOPPER valve (5 levels, turn it up or down) decides how many lemons enter per second; each lemon fed costs
+   LEMON_COST. Before that, lemons simply enter at stage 1's own speed. Every stage processes lemons from the
+   pile in front of it; if a pile is full the extra lemons spill and are lost (already paid for).              */
 const SIM = { buf: {}, out: {}, util: {}, spill: {}, intake: 0, sold: 0, income: 0, eff: 0, hold: 0 };
 const procCost = s => PROC * s.value;
-function steady(levels = G.lvl){           // closed-form steady state for a set of levels (also used for offline income)
+const valveRate = v => VALVE[v - 1];
+function steady(levels = G.lvl, valve = G.valve){           // closed-form steady state for a set of levels + valve setting
   const c = []; for (const s of STAGES){ if (!(levels[s.id] > 0)) break; c.push(s); }
   if (!c.length) return { chain: c, sold: 0, intake: 0, profit: 0, eff: 0, bott: -1, spills: [] };
-  const r = c.map(s => rateAt(s.id, levels[s.id])); let f = r[0], cost = r[0] * procCost(c[0]), b = 0; const spills = [0];
+  const open = c.length === STAGES.length, r = c.map(s => rateAt(s.id, levels[s.id]));
+  const intake = open ? valveRate(valve) : r[0];
+  let f = intake, cost = open ? intake * LEMON_COST : 0, b = 0; const spills = [];
   r.forEach((v, i) => { if (v < r[b]) b = i; });
-  for (let i = 1; i < c.length; i++){ spills[i] = Math.max(0, f - r[i]); f = Math.min(f, r[i]); cost += f * procCost(c[i]) + spills[i] * SPILL_COST; }
+  c.forEach((s, i) => { spills[i] = Math.max(0, f - r[i]); f = Math.min(f, r[i]); cost += f * procCost(s) + spills[i] * SPILL_COST; });
   const profit = f * cumValue(c.length - 1) - cost;
-  return { chain: c, sold: f, intake: r[0], profit, eff: Math.min(1, f / r[0]) * Math.min(1, f / TARGET), bott: b, spills };
+  return { chain: c, sold: f, intake, profit, eff: Math.min(1, f / intake) * Math.min(1, f / TARGET), bott: b, spills };
 }
 const chain = () => steady().chain;
 function lineStats(){ const t = steady(); return { chain: t.chain, rate: t.sold, income: t.profit, bott: t.bott }; }
 function simStep(dt){
-  const c = chain(), a = 1 - Math.exp(-dt / 3), a1 = 1 - Math.exp(-dt / 1.2);
-  let sold = 0, intake = 0, cost = 0, rev = 0;
+  const c = chain(), a = 1 - Math.exp(-dt / 3), a1 = 1 - Math.exp(-dt / 1.2), open = c.length === STAGES.length;
+  let sold = 0, cost = 0, rev = 0;
+  const intakeRate = c.length ? (open ? valveRate(G.valve) : rateOf(c[0].id)) : 0, inflow = intakeRate * dt;
   STAGES.forEach(s => { if (!c.includes(s)){ SIM.buf[s.id] = 0; SIM.util[s.id] = 0; SIM.out[s.id] = 0; SIM.spill[s.id] = 0; } });
+  let hSpill = 0;
+  if (c.length){ const f0 = c[0], room = Math.max(0, QUEUE_CAP - (SIM.buf[f0.id] || 0)), push = Math.min(inflow, room); SIM.buf[f0.id] = (SIM.buf[f0.id] || 0) + push; hSpill = inflow - push; }
+  G.lost += hSpill; cost += (open ? inflow * LEMON_COST : 0) + hSpill * SPILL_COST;
+  SIM.out.hopper = (SIM.out.hopper || 0) + (intakeRate - (SIM.out.hopper || 0)) * a1;
+  SIM.spill.hopper = (SIM.spill.hopper || 0) + (hSpill / dt - (SIM.spill.hopper || 0)) * a1;
   c.forEach((s, i) => {
-    const want = rateOf(s.id) * dt, done = i === 0 ? want : Math.min(want, SIM.buf[s.id] || 0), nxt = c[i + 1];
-    if (i > 0) SIM.buf[s.id] -= done; else intake = done;
-    cost += done * procCost(s);
+    const want = rateOf(s.id) * dt, done = Math.min(want, SIM.buf[s.id] || 0), nxt = c[i + 1];
+    SIM.buf[s.id] -= done; cost += done * procCost(s);
     let spilled = 0;
     if (nxt){ const room = Math.max(0, QUEUE_CAP - (SIM.buf[nxt.id] || 0)), push = Math.min(done, room); SIM.buf[nxt.id] = (SIM.buf[nxt.id] || 0) + push; spilled = done - push; G.lost += spilled; cost += spilled * SPILL_COST; }
     else { sold = done; rev = done * cumValue(i); }
@@ -226,12 +236,13 @@ function simStep(dt){
     SIM.spill[s.id] = (SIM.spill[s.id] || 0) + (spilled / dt - (SIM.spill[s.id] || 0)) * a1;
   });
   G.coins = Math.max(0, G.coins + rev - cost);
-  SIM.intake += (intake / dt - SIM.intake) * a; SIM.sold += (sold / dt - SIM.sold) * a; SIM.income += ((rev - cost) / dt - SIM.income) * a;
+  SIM.intake += (intakeRate - SIM.intake) * a; SIM.sold += (sold / dt - SIM.sold) * a; SIM.income += ((rev - cost) / dt - SIM.income) * a;
   const yld = SIM.intake > .02 ? Math.min(1, SIM.sold / SIM.intake) : 0;
   SIM.eff = yld * Math.min(1, SIM.sold / TARGET);
-  if (c.length === STAGES.length && SIM.eff >= .985) SIM.hold += dt; else SIM.hold = Math.max(0, SIM.hold - dt * 2);
+  if (open && SIM.eff >= .985) SIM.hold += dt; else SIM.hold = Math.max(0, SIM.hold - dt * 2);
   if (SIM.hold >= HOLD_TO_WIN && !G.won){ G.won = true; say('★ 100% EFFICIENCY! Your lemonade factory is fully optimized. YOU WIN!'); }
 }
+function setValve(v){ v = Math.max(1, Math.min(5, v)); if (v !== G.valve){ G.valve = v; say(`🍋 Lemon valve: level ${v}/5`); save(); } }
 
 /* ======================================================================
    STAGE 1 — INSPECTION  (click the bad lemons)
@@ -564,7 +575,7 @@ function qcDraw(){
 /* ======================================================================
    OVERVIEW  (the factory floor: physical belts, piles and spills — no hints)
    ====================================================================== */
-const MX = i => 3 + i * 15, BELT_Y = 17, FXS = [];
+const MX = i => 14 + i * 14, BELT_Y = 17, FXS = [];
 let HOVER = -1;
 const DIG = {
   '0': ['█████', '█   █', '█   █', '█   █', '█████'], '1': ['  █  ', ' ██  ', '  █  ', '  █  ', ' ███ '],
@@ -621,6 +632,23 @@ function ovMachine(i){
   const nx = nextLevel(s);
   put(x + 1, 21, nx ? `▲${nx.cost}¢` : 'MAX', nx ? (G.coins >= nx.cost ? 'g' : 'd') : 'd');
 }
+function ovHopper(c){
+  const x = 2, v = G.valve, flow = SIM.out.hopper || 0, f = Math.floor(T * (2 + flow * 3));
+  put(x, 12, 'HOPPER', 't');
+  put(x, 13, '\\OoOoOoO/', 'a'); put(x, 14, ' \\OoOoO/ ', 'a'); put(x, 15, '  \\OoO/  ', 'a');
+  put(x + 2, 16, `─(${'+x'[f % 2]})─`, 'h');
+  belt(3, 13, BELT_Y, T, 2 + flow * 2, 's');
+  const n = Math.min(4, Math.max(1, Math.round(flow * 1.3)));
+  for (let k = 0; k < n; k++) put(6 + ((T * 6 + k * 8 / n) % 8), BELT_Y, 'o', 'a');
+  if (c.length){
+    const cells = Math.round(Math.min(1, (SIM.buf[c[0].id] || 0) / QUEUE_CAP) * 9);
+    for (let k = 0; k < cells; k++) put(13 - (k % 3), 16 - Math.floor(k / 3), (k % 3) ? 'O' : 'o', k % 4 ? 'a' : 'ad');
+    const sp = SIM.spill.hopper || 0;
+    for (let k = 0; k < Math.min(4, Math.ceil(sp * 1.5)); k++){ const yy = 18 + ((T * 7 + k * 1.7) % 5); put(11 + (k % 2) * 2, yy, yy < 21 ? 'o' : '.', yy < 21 ? 'a' : 'd'); }
+  }
+  for (let k = 0; k < 5; k++) put(x + 2 + k, 20, k < v ? '●' : '○', k < v ? 'h' : 'd');
+  put(x, 21, '[-]   [+]', 'g');
+}
 function ovDraw(){
   put(3, 1, 'COINS', 'd'); put(9, 1, String(Math.floor(G.coins)).padEnd(7), 'h'); put(24, 1, `profit ${SIM.income >= 0 ? '+' : ''}${SIM.income.toFixed(1)}/s`, 'g');
   ovGauge();
@@ -632,16 +660,17 @@ function ovDraw(){
     belt(x1, x2, BELT_Y, T, 2 + (SIM.out[s.id] || 0) * 2, inChain ? 's' : 'd');
     if (inChain){
       const out = SIM.out[s.id] || 0, n = Math.min(3, Math.round(out * 1.3));
-      for (let k = 0; k < n; k++) put(x1 + ((T * 6 + k * 5 / n) % 5), BELT_Y, 'o', 'a');
-      const cells = Math.round(Math.min(1, (SIM.buf[nx.id] || 0) / QUEUE_CAP) * 15);
-      for (let k = 0; k < cells; k++) put(x2 - (k % 5), 16 - Math.floor(k / 5), (k + i) % 3 ? 'O' : 'o', (k + i) % 4 ? 'a' : 'ad');
+      for (let k = 0; k < n; k++) put(x1 + ((T * 6 + k * 4 / n) % 4), BELT_Y, 'o', 'a');
+      const cells = Math.round(Math.min(1, (SIM.buf[nx.id] || 0) / QUEUE_CAP) * 12);
+      for (let k = 0; k < cells; k++) put(x2 - (k % 4), 16 - Math.floor(k / 4), (k + i) % 3 ? 'O' : 'o', (k + i) % 4 ? 'a' : 'ad');
       const sp = SIM.spill[s.id] || 0;
       for (let k = 0; k < Math.min(4, Math.ceil(sp * 1.5)); k++){ const yy = 18 + ((T * 7 + k * 1.7) % 5); put(x1 + (k % 2) * 2, yy, yy < 21 ? 'o' : '.', yy < 21 ? 'a' : 'd'); }
     } else if (c.includes(s)) put(x1 + 1, 16, '►$', 'g');
   }
   const last = STAGES[STAGES.length - 1];
-  if (c.includes(last)){ const x1 = MX(5) + 10; belt(x1, x1 + 4, BELT_Y, T, 2 + (SIM.out[last.id] || 0) * 2, 's'); put(x1 + 5, 15, '┌──┐', 'h'); put(x1 + 5, 16, '│$$│', 'g'); put(x1 + 5, 17, '└──┘', 'h'); }
+  if (c.includes(last)){ const x1 = MX(5) + 10; belt(x1, x1 + 1, BELT_Y, T, 2 + (SIM.out[last.id] || 0) * 2, 's'); put(x1 + 2, 15, '┌──┐', 'h'); put(x1 + 2, 16, '│$$│', 'g'); put(x1 + 2, 17, '└──┘', 'h'); }
   else if (c.includes(STAGES[c.length - 1]) && c.length === STAGES.length - 0) { /* no-op */ }
+  ovHopper(c);
   // upgrade effects: sparkle bursts for big upgrades, speed lines for small ones
   FXS.forEach(fx => {
     const x = MX(fx.i), a = fx.t;
@@ -660,16 +689,20 @@ function ovDraw(){
   if (hs && G.unlocked[hs.id]){
     const nx = nextLevel(hs), cur = lvl(hs.id) > 0 ? lvlData(hs.id, lvl(hs.id)) : null;
     put(3, 25, !lvl(hs.id) ? `${hs.title}: you run this by hand — master it, then automate.` : nx ? `${nx.name}  ·  ${nx.kind === 'big' ? 'big upgrade' : 'small upgrade'}  ·  about +${Math.round((nx.rate / cur.rate - 1) * 100)}% speed  ·  ${nx.cost}¢` : `${hs.title} is fully upgraded.`, 'h');
-  } else put(3, 25, 'click a machine to upgrade it  ·  watch where the lemons pile up, and where they fall', 'd');
+  } else if (HOVER === -2) put(3, 25, 'LEMON VALVE: click the left half to turn it down, the right half to turn it up (arrow keys too).', 'h');
+  else put(3, 25, 'click a machine to upgrade it  ·  click the hopper to turn the lemon valve  ·  watch the piles', 'd');
   put(3, 26, `lemons lost: ${Math.floor(G.lost)}`, G.lost > 0 ? 's' : 'd');
 }
 function ovHit(cx, cy){
   if (cy < 11.5 || cy > 22.5) return -1;
+  if (cx >= 1 && cx <= 11) return -2;                       // the hopper
   for (let i = 0; i < STAGES.length; i++) if (cx >= MX(i) - 1 && cx <= MX(i) + 10) return i;
   return -1;
 }
 function ovClick(cx, cy){
-  const i = ovHit(cx, cy); if (i < 0 || !G.unlocked[STAGES[i].id]) return;
+  const i = ovHit(cx, cy);
+  if (i === -2){ setValve(G.valve + (cx < 6.5 ? -1 : 1)); return; }
+  if (i < 0 || !G.unlocked[STAGES[i].id]) return;
   if (!automated(STAGES[i].id)) setView(STAGES[i].id); else buy(STAGES[i].id, true);
 }
 
@@ -788,7 +821,7 @@ function buy(id, viaFloor = false){
     if (bonus) msg += ' Free bonus: upgraded to Lv 2!';
     if (nxt && !G.unlocked[nxt.id]){ G.unlocked[nxt.id] = true; msg += ` 🔓 ${nxt.title} unlocked — click its flashing tab.`; }
     if (floorOpen() && !G.floorGift){
-      G.floorGift = true; G.coins += FLOOR_START_COINS;
+      G.floorGift = true; G.coins += FLOOR_START_COINS; G.valve = VALVE_START;
       if (lvl('inspect') < FLOOR_INSPECT_LEVEL){ G.lvl.inspect = FLOOR_INSPECT_LEVEL; G.m.inspect = { p: 100, done: true }; FXS.push({ i: 0, kind: 'small', t: 0 }); }
       msg += ` 🏭 THE LINE IS COMPLETE! Investors give you ${FLOOR_START_COINS} coins and upgrade Inspection to Lv ${FLOOR_INSPECT_LEVEL}. Click the flashing Factory Floor tab.`;
     }
@@ -809,6 +842,7 @@ scr.addEventListener('pointermove', e => { if (view !== 'overview'){ HOVER = -1;
 scr.addEventListener('pointerleave', () => { HOVER = -1; });
 window.addEventListener('pointerup', () => { const m = MODS[view]; if (m.release) m.release(); });
 document.addEventListener('keydown', e => {
+  if (view === 'overview'){ if (e.key === 'ArrowUp' || e.key === 'ArrowRight'){ e.preventDefault(); setValve(G.valve + 1); } if (e.key === 'ArrowDown' || e.key === 'ArrowLeft'){ e.preventDefault(); setValve(G.valve - 1); } return; }
   if (e.code === 'Space' && ['grind', 'press', 'pasteur'].includes(view)){ e.preventDefault(); if (e.repeat) return; MODS[view].click(0, 0); if (view === 'grind') return; }
   if (view === 'grind' && (e.key === 'e' || e.key === 'E')) grDose();
 });
@@ -845,7 +879,7 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 window.addEventListener('beforeunload', save);
-window.__T = { get G(){ return G; }, GR, I, SIM, buy, setView, grCrank, grDose, CEN, STAGES, MC, PR, PS, QC, mcClick, psClick, qcClick, prHold, lineStats, steady, rateAt, FXS, TARGET, buyState, floorOpen, mcLayout, setSpeed, BONUS_LEVEL2, get view(){ return view; } };
+window.__T = { get G(){ return G; }, GR, I, SIM, buy, setView, grCrank, grDose, CEN, STAGES, MC, PR, PS, QC, mcClick, psClick, qcClick, prHold, lineStats, steady, rateAt, FXS, TARGET, buyState, floorOpen, mcLayout, setSpeed, setValve, steady, BONUS_LEVEL2, get view(){ return view; } };
 requestAnimationFrame(frame);
 </script>
 </body>
