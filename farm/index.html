@@ -18,13 +18,18 @@
 <div class="buttons">
   <button id="sell" type="button">Sell lemons</button>
   <button id="chop" type="button">Chop tree (C)</button>
+  <button id="hire" type="button"></button>
 </div>
-<script src="farm.js?v=4"></script>
+<script src="farm.js?v=5"></script>
 <script>
   const params = new URLSearchParams(location.search);
   const game = Farm.newGame(params.has('seed') ? Number(params.get('seed')) : undefined);
   const screen = document.getElementById('screen');
-  const draw = () => { screen.textContent = Farm.render(game); };
+  const hireBtn = document.getElementById('hire');
+  const draw = () => {
+    screen.textContent = Farm.render(game);
+    hireBtn.textContent = `Hire harvester (H) - ${Farm.harvesterCost(game)} coins`;
+  };
   const dirs = {
     ArrowUp: [0, -1], w: [0, -1], ArrowDown: [0, 1], s: [0, 1],
     ArrowLeft: [-1, 0], a: [-1, 0], ArrowRight: [1, 0], d: [1, 0],
@@ -36,17 +41,19 @@
     else if (k === 'e') Farm.harvest(game);
     else if (k === 'c') Farm.chop(game);
     else if (k === 'b') Farm.buySapling(game);
+    else if (k === 'h') Farm.hireHarvester(game);
     else return;
     e.preventDefault();
     draw();
   });
-  for (const [id, action] of [['sell', Farm.sellLemons], ['chop', Farm.chop]]) {
+  for (const [id, action] of [['sell', Farm.sellLemons], ['chop', Farm.chop], ['hire', Farm.hireHarvester]]) {
     document.getElementById(id).addEventListener('click', (e) => {
       action(game);
       e.currentTarget.blur();   // keep keyboard focus on the game, not the button
       draw();
     });
   }
+  setInterval(() => { Farm.tick(game); draw(); }, Farm.TICK_MS);   // the farm runs in real time
   draw();
 </script>
 </body>
