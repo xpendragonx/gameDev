@@ -70,6 +70,9 @@ const scr = document.getElementById('scr');
    ====================================================================== */
 const DEFAULT_P = {
   startCoins: 3000,       // coins you walk onto the floor with
+  lemonCost: 0.6,         // coins each lemon fed through the valve costs you (so feeding lemons that spill burns money)
+  valveStart: 1,          // valve level at the start (1-5)
+  v1: 0.29, v2: 0.51, v3: 0.92, v4: 1.65, v5: 3.0,   // lemons/s the valve lets in at each of its 5 levels (top level should reach the target)
   inspectStart: 3,        // Inspection starts at this level on the floor
   bonusLevel2: 1,         // 1 = Pasteurizer and Final QC are installed at Lv 2 (free bonus with their first upgrade)
   target: 3.0,            // lemons/s needed for 100% efficiency
@@ -172,38 +175,45 @@ function say(s){ document.getElementById('msg').textContent = s; msgT = 7; }
 function startLevels(){ const lv = {}; STAGES.forEach(s => lv[s.id] = 1); if (P.bonusLevel2){ lv.pasteur = 2; lv.qc = 2; } lv.inspect = Math.max(1, Math.min(P.inspectStart, maxLvl('inspect'))); return lv; }
 function newGame(){
   buildStages();
-  G = { coins: P.startCoins, lvl: startLevels(), unlocked: {}, lost: 0, won: false, winT: null, t: 0, bought: 0, hist: [], lastHist: 0, marks: {}, log: [] };
+  G = { coins: P.startCoins, valve: Math.max(1, Math.min(5, Math.round(P.valveStart))), lvl: startLevels(), unlocked: {}, lost: 0, won: false, winT: null, t: 0, bought: 0, hist: [], lastHist: 0, marks: {}, log: [] };
   STAGES.forEach(s => G.unlocked[s.id] = true);
   Object.assign(SIM, { buf: {}, out: {}, util: {}, spill: {}, intake: 0, sold: 0, income: 0, eff: 0, hold: 0 });
   SIM.income = steady().profit;
   FXS.length = 0; G.p0 = Math.max(.01, SIM.income);
 }
 /* ---------- production-line simulation ----------
-   Automated stages form a chain from stage 1. Every stage processes lemons from the
-   pile in front of it. If the pile in front of the NEXT stage is full, the lemons
-   spill and are lost (their processing cost is already spent).                    */
+   The HOPPER valve feeds lemons onto the belt at one of 5 rates (turn it up or down). Every stage
+   processes lemons from the pile in front of it. If a pile is full, extra lemons spill and are lost
+   (you already paid for them: each lemon costs P.lemonCost). Units leaving the last stage are sold.  */
 const SIM = { buf: {}, out: {}, util: {}, spill: {}, intake: 0, sold: 0, income: 0, eff: 0, hold: 0 };
 const procCost = s => P.proc * s.value;
-function steady(levels = G.lvl){           // closed-form steady state for a set of levels (also used for offline income)
+const valveRate = v => P['v' + v];
+function steady(levels = G.lvl, valve = G.valve){           // closed-form steady state for a set of levels + valve setting
   const c = []; for (const s of STAGES){ if (!(levels[s.id] > 0)) break; c.push(s); }
-  if (!c.length) return { chain: c, sold: 0, intake: 0, profit: 0, eff: 0, bott: -1, spills: [] };
-  const r = c.map(s => rateAt(s.id, levels[s.id])); let f = r[0], cost = r[0] * procCost(c[0]), b = 0; const spills = [0];
+  const intake = valveRate(valve);
+  if (!c.length) return { chain: c, sold: 0, intake, profit: -intake * P.lemonCost, eff: 0, bott: -1, spills: [] };
+  const r = c.map(s => rateAt(s.id, levels[s.id])); let f = intake, cost = intake * P.lemonCost, b = 0; const spills = [];
   r.forEach((v, i) => { if (v < r[b]) b = i; });
-  for (let i = 1; i < c.length; i++){ spills[i] = Math.max(0, f - r[i]); f = Math.min(f, r[i]); cost += f * procCost(c[i]) + spills[i] * P.spill; }
+  c.forEach((s, i) => { spills[i] = Math.max(0, f - r[i]); f = Math.min(f, r[i]); cost += f * procCost(s) + spills[i] * P.spill; });
   const profit = f * cumValue(c.length - 1) - cost;
-  return { chain: c, sold: f, intake: r[0], profit, eff: Math.min(1, f / r[0]) * Math.min(1, f / TARGET), bott: b, spills };
+  return { chain: c, sold: f, intake, profit, eff: Math.min(1, f / intake) * Math.min(1, f / TARGET), bott: b, spills };
 }
 const chain = () => steady().chain;
 function lineStats(){ const t = steady(); return { chain: t.chain, rate: t.sold, income: t.profit, bott: t.bott }; }
 function simStep(dt){
   G.t += dt;
   const c = chain(), a = 1 - Math.exp(-dt / 3), a1 = 1 - Math.exp(-dt / 1.2);
-  let sold = 0, intake = 0, cost = 0, rev = 0;
+  let sold = 0, cost = 0, rev = 0;
+  const intakeRate = valveRate(G.valve), inflow = intakeRate * dt;
   STAGES.forEach(s => { if (!c.includes(s)){ SIM.buf[s.id] = 0; SIM.util[s.id] = 0; SIM.out[s.id] = 0; SIM.spill[s.id] = 0; } });
+  let hSpill = inflow;
+  if (c.length){ const f0 = c[0], room = Math.max(0, QUEUE_CAP - (SIM.buf[f0.id] || 0)), push = Math.min(inflow, room); SIM.buf[f0.id] = (SIM.buf[f0.id] || 0) + push; hSpill = inflow - push; }
+  G.lost += hSpill; cost += inflow * P.lemonCost + hSpill * P.spill;
+  SIM.out.hopper = (SIM.out.hopper || 0) + (intakeRate - (SIM.out.hopper || 0)) * a1;
+  SIM.spill.hopper = (SIM.spill.hopper || 0) + (hSpill / dt - (SIM.spill.hopper || 0)) * a1;
   c.forEach((s, i) => {
-    const want = rateOf(s.id) * dt, done = i === 0 ? want : Math.min(want, SIM.buf[s.id] || 0), nxt = c[i + 1];
-    if (i > 0) SIM.buf[s.id] -= done; else intake = done;
-    cost += done * procCost(s);
+    const want = rateOf(s.id) * dt, done = Math.min(want, SIM.buf[s.id] || 0), nxt = c[i + 1];
+    SIM.buf[s.id] -= done; cost += done * procCost(s);
     let spilled = 0;
     if (nxt){ const room = Math.max(0, QUEUE_CAP - (SIM.buf[nxt.id] || 0)), push = Math.min(done, room); SIM.buf[nxt.id] = (SIM.buf[nxt.id] || 0) + push; spilled = done - push; G.lost += spilled; cost += spilled * P.spill; }
     else { sold = done; rev = done * cumValue(i); }
@@ -212,13 +222,13 @@ function simStep(dt){
     SIM.spill[s.id] = (SIM.spill[s.id] || 0) + (spilled / dt - (SIM.spill[s.id] || 0)) * a1;
   });
   G.coins = Math.max(0, G.coins + rev - cost);
-  SIM.intake += (intake / dt - SIM.intake) * a; SIM.sold += (sold / dt - SIM.sold) * a; SIM.income += ((rev - cost) / dt - SIM.income) * a;
+  SIM.intake += (intakeRate - SIM.intake) * a; SIM.sold += (sold / dt - SIM.sold) * a; SIM.income += ((rev - cost) / dt - SIM.income) * a;
   const yld = SIM.intake > .02 ? Math.min(1, SIM.sold / SIM.intake) : 0;
   SIM.eff = yld * Math.min(1, SIM.sold / TARGET);
   if (c.length === STAGES.length && SIM.eff >= .985) SIM.hold += dt; else SIM.hold = Math.max(0, SIM.hold - dt * 2);
   if (SIM.hold >= HOLD_TO_WIN && !G.won){ G.won = true; G.winT = G.t; say('★ 100% EFFICIENCY! Factory optimized at ' + fmtT(G.t) + ' of play.'); }
 }
-
+function setValve(v){ v = Math.max(1, Math.min(5, v)); if (v !== G.valve){ G.valve = v; say(`🍋 Lemon valve: level ${v}/5`); } }
 
 function buy(id){
   const l = lvl(id); if (l >= maxLvl(id)) return;
@@ -232,7 +242,7 @@ function buy(id){
 /* ======================================================================
    OVERVIEW  (the factory floor: physical belts, piles and spills — no hints)
    ====================================================================== */
-const MX = i => 3 + i * 15, BELT_Y = 17, FXS = [];
+const MX = i => 14 + i * 14, BELT_Y = 17, FXS = [];
 let HOVER = -1;
 const DIG = {
   '0': ['█████', '█   █', '█   █', '█   █', '█████'], '1': ['  █  ', ' ██  ', '  █  ', '  █  ', ' ███ '],
@@ -289,6 +299,23 @@ function ovMachine(i){
   const nx = nextLevel(s);
   put(x + 1, 21, nx ? `▲${nx.cost}¢` : 'MAX', nx ? (G.coins >= nx.cost ? 'g' : 'd') : 'd');
 }
+function ovHopper(c){
+  const x = 2, v = G.valve, flow = SIM.out.hopper || 0, f = Math.floor(T * (2 + flow * 3));
+  put(x, 12, 'HOPPER', 't');
+  put(x, 13, '\\OoOoOoO/', 'a'); put(x, 14, ' \\OoOoO/ ', 'a'); put(x, 15, '  \\OoO/  ', 'a');
+  put(x + 2, 16, `─(${'+x'[f % 2]})─`, 'h');
+  belt(3, 13, BELT_Y, T, 2 + flow * 2, 's');
+  const n = Math.min(4, Math.max(1, Math.round(flow * 1.3)));
+  for (let k = 0; k < n; k++) put(6 + ((T * 6 + k * 8 / n) % 8), BELT_Y, 'o', 'a');
+  if (c.length){
+    const cells = Math.round(Math.min(1, (SIM.buf[c[0].id] || 0) / QUEUE_CAP) * 9);
+    for (let k = 0; k < cells; k++) put(13 - (k % 3), 16 - Math.floor(k / 3), (k % 3) ? 'O' : 'o', k % 4 ? 'a' : 'ad');
+    const sp = SIM.spill.hopper || 0;
+    for (let k = 0; k < Math.min(4, Math.ceil(sp * 1.5)); k++){ const yy = 18 + ((T * 7 + k * 1.7) % 5); put(11 + (k % 2) * 2, yy, yy < 21 ? 'o' : '.', yy < 21 ? 'a' : 'd'); }
+  }
+  for (let k = 0; k < 5; k++) put(x + 2 + k, 20, k < v ? '●' : '○', k < v ? 'h' : 'd');
+  put(x, 21, '[-]   [+]', 'g');
+}
 function ovDraw(){
   put(3, 1, 'COINS', 'd'); put(9, 1, String(Math.floor(G.coins)).padEnd(7), 'h'); put(24, 1, `profit ${SIM.income >= 0 ? '+' : ''}${SIM.income.toFixed(1)}/s`, 'g');
   ovGauge();
@@ -300,16 +327,17 @@ function ovDraw(){
     belt(x1, x2, BELT_Y, T, 2 + (SIM.out[s.id] || 0) * 2, inChain ? 's' : 'd');
     if (inChain){
       const out = SIM.out[s.id] || 0, n = Math.min(3, Math.round(out * 1.3));
-      for (let k = 0; k < n; k++) put(x1 + ((T * 6 + k * 5 / n) % 5), BELT_Y, 'o', 'a');
-      const cells = Math.round(Math.min(1, (SIM.buf[nx.id] || 0) / QUEUE_CAP) * 15);
-      for (let k = 0; k < cells; k++) put(x2 - (k % 5), 16 - Math.floor(k / 5), (k + i) % 3 ? 'O' : 'o', (k + i) % 4 ? 'a' : 'ad');
+      for (let k = 0; k < n; k++) put(x1 + ((T * 6 + k * 4 / n) % 4), BELT_Y, 'o', 'a');
+      const cells = Math.round(Math.min(1, (SIM.buf[nx.id] || 0) / QUEUE_CAP) * 12);
+      for (let k = 0; k < cells; k++) put(x2 - (k % 4), 16 - Math.floor(k / 4), (k + i) % 3 ? 'O' : 'o', (k + i) % 4 ? 'a' : 'ad');
       const sp = SIM.spill[s.id] || 0;
       for (let k = 0; k < Math.min(4, Math.ceil(sp * 1.5)); k++){ const yy = 18 + ((T * 7 + k * 1.7) % 5); put(x1 + (k % 2) * 2, yy, yy < 21 ? 'o' : '.', yy < 21 ? 'a' : 'd'); }
     } else if (c.includes(s)) put(x1 + 1, 16, '►$', 'g');
   }
   const last = STAGES[STAGES.length - 1];
-  if (c.includes(last)){ const x1 = MX(5) + 10; belt(x1, x1 + 4, BELT_Y, T, 2 + (SIM.out[last.id] || 0) * 2, 's'); put(x1 + 5, 15, '┌──┐', 'h'); put(x1 + 5, 16, '│$$│', 'g'); put(x1 + 5, 17, '└──┘', 'h'); }
+  if (c.includes(last)){ const x1 = MX(5) + 10; belt(x1, x1 + 1, BELT_Y, T, 2 + (SIM.out[last.id] || 0) * 2, 's'); put(x1 + 2, 15, '┌──┐', 'h'); put(x1 + 2, 16, '│$$│', 'g'); put(x1 + 2, 17, '└──┘', 'h'); }
   else if (c.includes(STAGES[c.length - 1]) && c.length === STAGES.length - 0) { /* no-op */ }
+  ovHopper(c);
   // upgrade effects: sparkle bursts for big upgrades, speed lines for small ones
   FXS.forEach(fx => {
     const x = MX(fx.i), a = fx.t;
@@ -328,26 +356,31 @@ function ovDraw(){
   if (hs && G.unlocked[hs.id]){
     const nx = nextLevel(hs), cur = lvl(hs.id) > 0 ? lvlData(hs.id, lvl(hs.id)) : null;
     put(3, 25, !lvl(hs.id) ? `${hs.title}: you run this by hand — master it, then automate.` : nx ? `${nx.name}  ·  ${nx.kind === 'big' ? 'big upgrade' : 'small upgrade'}  ·  about +${Math.round((nx.rate / cur.rate - 1) * 100)}% speed  ·  ${nx.cost}¢` : `${hs.title} is fully upgraded.`, 'h');
-  } else put(3, 25, 'click a machine to upgrade it  ·  watch where the lemons pile up, and where they fall', 'd');
+  } else if (HOVER === -2) put(3, 25, 'LEMON VALVE: click the left half to turn it down, the right half to turn it up (arrow keys too).', 'h');
+  else put(3, 25, 'click a machine to upgrade it  ·  click the hopper to turn the lemon valve  ·  watch the piles', 'd');
   put(3, 26, `lemons lost: ${Math.floor(G.lost)}`, G.lost > 0 ? 's' : 'd');
 }
 function ovHit(cx, cy){
   if (cy < 11.5 || cy > 22.5) return -1;
+  if (cx >= 1 && cx <= 11) return -2;                       // the hopper
   for (let i = 0; i < STAGES.length; i++) if (cx >= MX(i) - 1 && cx <= MX(i) + 10) return i;
   return -1;
 }
 function ovClick(cx, cy){
-  const i = ovHit(cx, cy); if (i < 0 || !G.unlocked[STAGES[i].id]) return;
+  const i = ovHit(cx, cy);
+  if (i === -2){ setValve(G.valve + (cx < 6.5 ? -1 : 1)); return; }
+  if (i < 0 || !G.unlocked[STAGES[i].id]) return;
   buy(STAGES[i].id);
 }
 
 
 /* ======================================================================
-   BOT (greedy: best profit-and-efficiency gain per coin) + analysis
+   BOT (greedy: best profit-and-efficiency gain per coin; always sets the valve to the most profitable level)
    ====================================================================== */
+function bestValve(lv){ let best = 1, bp = -1e9; for (let v = 1; v <= 5; v++){ const sc = steady(lv, v).profit + 1e-6 * v; if (sc > bp){ bp = sc; best = v; } } return best; }
 function botPick(lv, coins){
-  const st = steady(lv), c = [];
-  STAGES.forEach(s => { const l = lv[s.id]; if (l >= s.upgrade.levels.length) return; const nl = Object.assign({}, lv, { [s.id]: l + 1 }), n = steady(nl), cost = s.upgrade.levels[l].cost;
+  const v0 = bestValve(lv), st = steady(lv, v0), c = [];
+  STAGES.forEach(s => { const l = lv[s.id]; if (l >= s.upgrade.levels.length) return; const nl = Object.assign({}, lv, { [s.id]: l + 1 }), n = steady(nl, bestValve(nl)), cost = s.upgrade.levels[l].cost;
     c.push({ id: s.id, cost, name: s.upgrade.levels[l].name, score: ((n.profit - st.profit) + 30 * (n.eff - st.eff)) / cost }); });
   if (!c.length) return null;
   let pick = c.filter(x => x.score > 1e-9).sort((a, b) => b.score - a.score)[0];
@@ -355,14 +388,14 @@ function botPick(lv, coins){
   return pick;
 }
 function runBot(){
-  buildStages(); let lv = startLevels(), coins = P.startCoins, t = 0, g = 0; const pts = [[0, steady(lv).profit, steady(lv).eff, 'start']];
+  buildStages(); let lv = startLevels(), coins = P.startCoins, t = 0, g = 0; const S_ = l => steady(l, bestValve(l)); const pts = [[0, S_(lv).profit, S_(lv).eff, 'start']];
   while (g++ < 400){
-    const st = steady(lv); if (st.eff >= .999) break;
+    const st = S_(lv); if (st.eff >= .999) break;
     const pick = botPick(lv, coins); if (!pick) break;
-    let w = 0; while (coins < pick.cost && w++ < 1e4){ const pr = Math.max(.05, steady(lv).profit); const dt = Math.max(.1, (pick.cost - coins) / pr); t += dt; coins += pr * dt; }
-    coins -= pick.cost; lv[pick.id]++; const n = steady(lv); pts.push([t, n.profit, n.eff, pick.name]);
+    let w = 0; while (coins < pick.cost && w++ < 1e4){ const pr = Math.max(.05, S_(lv).profit); const dt = Math.max(.1, (pick.cost - coins) / pr); t += dt; coins += pr * dt; }
+    coins -= pick.cost; lv[pick.id]++; const n = S_(lv); pts.push([t, n.profit, n.eff, pick.name + (bestValve(lv) !== bestValve(Object.assign({}, lv, { [pick.id]: lv[pick.id] - 1 })) ? `  (valve → ${bestValve(lv)})` : '')]);
   }
-  const fin = steady(lv), total = t + P.hold, first = pts[0][1], out = [];
+  const fin = S_(lv), total = t + P.hold, first = pts[0][1], out = [];
   out.push(`BOT RESULT  win at ≈ ${fmtT(total)}  (${pts.length - 1} upgrades, ends at ${(fin.profit).toFixed(1)} coins/s, efficiency ${Math.round(fin.eff * 100)}%)`);
   out.push(`profit grows ×${(fin.profit / Math.max(.01, first)).toFixed(1)} over the run (${first.toFixed(1)} → ${fin.profit.toFixed(1)}/s)`);
   const dbl = []; for (let k = 1; k <= 6; k++){ const p = pts.find(q => q[1] >= first * Math.pow(2, k)); if (p) dbl.push(`×${Math.pow(2, k)} at ${fmtT(p[0])}`); }
@@ -387,7 +420,7 @@ function renderTools(){
   mk('↺ Restart', () => { newGame(); renderTools(); say('Restarted.'); }, false);
   lab('Cheat:'); [500, 5000].forEach(v => mk('+' + v + '¢', () => { G.coins += v; }, false));
 }
-const GL = [['startCoins', 'Start coins'], ['inspectStart', 'Inspection starts at Lv'], ['bonusLevel2', 'Pasteur+QC start Lv2 (1/0)'], ['target', 'Target lemons/s'], ['hold', 'Hold-to-win secs'], ['queueCap', 'Pile size (spill)'], ['price', 'Price multiplier'], ['proc', 'Processing cost (× value)'], ['spill', 'Spill penalty ¢/lemon'], ['smallGrowth', 'Small level speed ×'], ['smallCost', 'Small level cost ×'], ['machCost', 'Machine cost ×'], ['costScale', 'All costs ×']];
+const GL = [['startCoins', 'Start coins'], ['lemonCost', 'Lemon cost ¢ each'], ['valveStart', 'Valve starts at level'], ['v1', 'Valve L1 lemons/s'], ['v2', 'Valve L2 lemons/s'], ['v3', 'Valve L3 lemons/s'], ['v4', 'Valve L4 lemons/s'], ['v5', 'Valve L5 lemons/s'], ['inspectStart', 'Inspection starts at Lv'], ['bonusLevel2', 'Pasteur+QC start Lv2 (1/0)'], ['target', 'Target lemons/s'], ['hold', 'Hold-to-win secs'], ['queueCap', 'Pile size (spill)'], ['price', 'Price multiplier'], ['proc', 'Processing cost (× value)'], ['spill', 'Spill penalty ¢/lemon'], ['smallGrowth', 'Small level speed ×'], ['smallCost', 'Small level cost ×'], ['machCost', 'Machine cost ×'], ['costScale', 'All costs ×']];
 function renderForm(){
   const g = document.getElementById('globals'); g.innerHTML = '';
   GL.forEach(([k, l]) => { const lb = document.createElement('label'); lb.textContent = l; const i = document.createElement('input'); i.type = 'number'; i.step = 'any'; i.value = P[k]; i.dataset.k = k; lb.appendChild(i); g.appendChild(lb); });
@@ -404,7 +437,7 @@ document.getElementById('defaults').onclick = () => { P = Object.assign({}, DEFA
 document.getElementById('runBot').onclick = () => { readForm(); runBot(); };
 document.getElementById('copy').onclick = () => {
   readForm(); buildStages();
-  const t = `/* paste into lemonade_tycoon.html CONFIG */\nconst TARGET = ${P.target}, HOLD_TO_WIN = ${P.hold}, QUEUE_CAP = ${P.queueCap}, PROC = ${P.proc}, SPILL_COST = ${P.spill}, PRICE = ${P.price};\n/* floor start: coins ${P.startCoins}; Pasteurizer + Final QC start at Lv ${P.bonusLevel2 ? 2 : 1} */\nconst STAGES = ${JSON.stringify(STAGES, null, 1).replace(/\n\s+/g, ' ')};`;
+  const t = `/* paste into lemonade_tycoon.html CONFIG */\nconst TARGET = ${P.target}, HOLD_TO_WIN = ${P.hold}, QUEUE_CAP = ${P.queueCap}, PROC = ${P.proc}, SPILL_COST = ${P.spill}, PRICE = ${P.price};\n/* hopper valve rates (lemons/s): ${[1, 2, 3, 4, 5].map(v => P['v' + v]).join(', ')}; lemon cost ${P.lemonCost} each; valve starts at level ${P.valveStart} */\n/* floor start: coins ${P.startCoins}; Pasteurizer + Final QC start at Lv ${P.bonusLevel2 ? 2 : 1} */\nconst STAGES = ${JSON.stringify(STAGES, null, 1).replace(/\n\s+/g, ' ')};`;
   const ta = document.getElementById('cfg'); ta.style.display = ''; ta.value = t; ta.select(); try { navigator.clipboard.writeText(t); } catch (e) {}
 };
 
@@ -414,11 +447,12 @@ function draw(){
 scr.addEventListener('pointerdown', e => { const r = scr.getBoundingClientRect(); ovClick((e.clientX - r.left) / (r.width / W), (e.clientY - r.top) / (r.height / H)); });
 scr.addEventListener('pointermove', e => { const r = scr.getBoundingClientRect(); HOVER = ovHit((e.clientX - r.left) / (r.width / W), (e.clientY - r.top) / (r.height / H)); });
 scr.addEventListener('pointerleave', () => { HOVER = -1; });
+document.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (e.key === 'ArrowUp' || e.key === 'ArrowRight'){ e.preventDefault(); setValve(G.valve + 1); } if (e.key === 'ArrowDown' || e.key === 'ArrowLeft'){ e.preventDefault(); setValve(G.valve - 1); } });
 
 /* ---------- live charts / stats ---------- */
 function updateStats(){
   const L = lineStats();
-  document.getElementById('stats').innerHTML = `time <b>${fmtT(G.t)}</b> · upgrades bought <b>${G.bought}</b> · profit <b>${SIM.income.toFixed(1)}</b>/s (×${(SIM.income / G.p0).toFixed(1)} vs start) · sold <b>${SIM.sold.toFixed(2)}</b> lemons/s · efficiency <b>${Math.round(SIM.eff * 100)}%</b>` + (G.winT !== null ? ` · <b>WON at ${fmtT(G.winT)}</b>` : '');
+  document.getElementById('stats').innerHTML = `valve <b>${G.valve}/5</b> · time <b>${fmtT(G.t)}</b> · upgrades bought <b>${G.bought}</b> · profit <b>${SIM.income.toFixed(1)}</b>/s (×${(SIM.income / G.p0).toFixed(1)} vs start) · sold <b>${SIM.sold.toFixed(2)}</b> lemons/s · efficiency <b>${Math.round(SIM.eff * 100)}%</b>` + (G.winT !== null ? ` · <b>WON at ${fmtT(G.winT)}</b>` : '');
   const h = G.hist; if (h.length > 1){
     const lg = h.map(v => Math.log(Math.max(.01, v))), mn = Math.min(...lg), mx = Math.max(...lg), SP = '▁▂▃▄▅▆▇█';
     document.getElementById('chart').textContent = 'profit/s over time (log scale, one mark = 2 s)\n' + lg.map(v => SP[Math.min(7, Math.floor((v - mn) / Math.max(.001, mx - mn) * 7.99))]).join('') + `\nlow ${Math.exp(mn).toFixed(1)} → high ${Math.exp(mx).toFixed(1)} coins/s     ` + 'a straight rising line on a log scale = exponential growth';
@@ -434,7 +468,7 @@ function frame(now){
     let sim = dt * speed;
     while (sim > 0){ const s = Math.min(.1, sim); simStep(s); sim -= s;
       if (G.t - G.lastHist >= 2){ G.lastHist = G.t; G.hist.push(SIM.income); if (G.hist.length > 120) G.hist.shift(); }
-      if (document.getElementById('autoBuy').checked && (botT += s) > .4){ botT = 0; const pk = botPick(G.lvl, G.coins); if (pk && G.coins >= pk.cost) buy(pk.id); } }
+      if (document.getElementById('autoBuy').checked && (botT += s) > .4){ botT = 0; G.valve = bestValve(G.lvl); const pk = botPick(G.lvl, G.coins); if (pk && G.coins >= pk.cost){ buy(pk.id); G.valve = bestValve(G.lvl); } } }
   }
   FXS.forEach(f => f.t += dt); while (FXS.length && FXS[0].t > 1.8) FXS.shift();
   if (msgT > 0 && (msgT -= dt) <= 0) document.getElementById('msg').textContent = '';
@@ -442,7 +476,7 @@ function frame(now){
   statT += dt; if (statT > .5){ statT = 0; updateStats(); }
   requestAnimationFrame(frame);
 }
-window.__P = { get D(){ return D; }, get G(){ return G; }, SIM, steady, buy, newGame, runBot, botPick, get P(){ return P; }, get STAGES(){ return STAGES; } };
+window.__P = { setValve, bestValve, valveRate, get D(){ return D; }, get G(){ return G; }, SIM, steady, buy, newGame, runBot, botPick, get P(){ return P; }, get STAGES(){ return STAGES; } };
 requestAnimationFrame(frame);
 </script>
 </body>
