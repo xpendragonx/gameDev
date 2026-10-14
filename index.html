@@ -38,13 +38,23 @@
     <button data-a="day"><kbd>␣</kbd> Next day</button>
     <button data-a="reset">New game</button>
   </div>
-  <div class="legend">Move: arrows/WASD or click a tile. &nbsp; <b>.</b> soil &nbsp; <b>s</b> sapling &nbsp; <b>Y</b> young &nbsp; <b>&amp;</b> mature &nbsp; <b>&amp;°</b> fruiting &nbsp; <b>x</b> dead</div>
+  <div class="bar shop">
+    <span class="legend" style="align-self:center">Automation:</span>
+    <button data-a="sprinkler">Sprinkler <kbd>B</kbd> ($25)</button>
+    <button data-a="picker">Hire picker ($40)</button>
+    <button data-a="truck">Market truck ($60)</button>
+    <button data-a="planter">Seedling bot ($50)</button>
+  </div>
+  <div class="legend">Move: arrows/WASD or click a tile. &nbsp; <b>.</b> soil &nbsp; <b>s</b> sapling &nbsp; <b>Y</b> young &nbsp; <b>&amp;</b> mature &nbsp; <b>&amp;°</b> fruiting &nbsp; <b>x</b> dead &nbsp; <b style="color:var(--water)">o</b> sprinkler</div>
   <div id="log"></div>
 </main>
 <script>
 const W = 10, H = 10, SAVE = "lemon-orchard-v1";
 const SEASONS = ["Spring", "Summer", "Autumn", "Winter"], SEASON_LEN = 30;
 const PLANT_COST = 5, LEMON_PRICE = 2;
+// Automation
+const SPRINKLER_COST = 25, PICKER_COST = 40, PICKER_WAGE = 2, PICKER_CAPACITY = 4;
+const TRUCK_COST = 60, TRUCK_CUT = 0.9, PLANTER_COST = 50, PLANTER_PER_DAY = 2;
 // Growth thresholds (days of life): sapling -> young -> mature -> fruiting
 const STAGE_AT = [0, 4, 9, 14];
 const GLYPH = ["s", "Y", "&", "&°"];
@@ -53,10 +63,11 @@ let S, cur = { x: 0, y: 0 };
 
 function fresh() {
   return { day: 1, coins: 30, lemons: 0, weather: "sunny", forecast: "sunny",
+           pickers: 0, truck: false, planter: false,
            tiles: Array.from({ length: W * H }, () => ({ tree: null, moist: 0.5 })) };
 }
 function load() {
-  try { const s = JSON.parse(localStorage.getItem(SAVE)); if (s && s.tiles && s.tiles.length === W * H) return s; } catch (e) {}
+  try { const s = JSON.parse(localStorage.getItem(SAVE)); if (s && s.tiles && s.tiles.length === W * H) return Object.assign(fresh(), s); } catch (e) {}
   return fresh();
 }
 function save() { try { localStorage.setItem(SAVE, JSON.stringify(S)); } catch (e) {} }
@@ -75,7 +86,8 @@ function log(msg) {
 function render() {
   $("stats").innerHTML =
     `<span>Day ${S.day} (${season()})</span><span>$${S.coins}</span><span>🍋 ${S.lemons}</span>` +
-    `<span>Today: ${S.weather}</span><span>Forecast: ${S.forecast}?</span>`;
+    `<span>Today: ${S.weather}</span><span>Forecast: ${S.forecast}?</span>` +
+    `<span>Crew: ${S.pickers} picker${S.pickers === 1 ? "" : "s"}${S.truck ? ", truck" : ""}${S.planter ? ", bot" : ""}</span>`;
   let html = "";
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
@@ -89,6 +101,7 @@ function render() {
           if (tile.tree.fruit > 0) color = "var(--lemon)";
         }
       }
+      if (tile.sprinkler) { ch = "o"; color = "var(--water)"; }
       const on = x === cur.x && y === cur.y;
       html += `<span class="c${on ? " cur" : ""}" data-x="${x}" data-y="${y}" style="color:${color}">${ch}</span>`;
     }
@@ -97,7 +110,8 @@ function render() {
   $("grid").innerHTML = html;
   const tile = t();
   let info = `Tile (${cur.x},${cur.y}) — moisture ${Math.round(tile.moist * 100)}%<br>`;
-  if (!tile.tree) info += "Empty soil.";
+  if (tile.sprinkler) info += "A sprinkler. Waters this tile and its 8 neighbours every day.";
+  else if (!tile.tree) info += "Empty soil.";
   else if (tile.tree.dead) info += "A dead tree. Plant again to clear it.";
   else info += `Tree age ${tile.tree.age}d, ${["sapling", "young tree", "mature tree", "fruiting tree"][stage(tile.tree)]}, ${tile.tree.fruit} lemons ready.`;
   $("info").innerHTML = info;
@@ -106,6 +120,7 @@ function render() {
 function act(a) {
   const tile = t();
   if (a === "plant") {
+    if (tile.sprinkler) return log("A sprinkler is in the way.");
     if (tile.tree && !tile.tree.dead) return log("Already a tree here.");
     if (S.coins < PLANT_COST) return log("Not enough coins.");
     S.coins -= PLANT_COST; tile.tree = { age: 0, fruit: 0, dry: 0, dead: false };
@@ -119,6 +134,22 @@ function act(a) {
     if (!S.lemons) return log("No lemons to sell.");
     const price = LEMON_PRICE + (S.weather === "heatwave" ? 1 : 0);
     const gain = S.lemons * price; S.coins += gain; log(`Sold ${S.lemons} lemons for $${gain}.`); S.lemons = 0;
+  } else if (a === "sprinkler") {
+    if (tile.sprinkler) return log("Already a sprinkler here.");
+    if (tile.tree) return log("Sprinklers need empty soil.");
+    if (S.coins < SPRINKLER_COST) return log("Not enough coins.");
+    S.coins -= SPRINKLER_COST; tile.sprinkler = true; log("Built a sprinkler.");
+  } else if (a === "picker") {
+    if (S.coins < PICKER_COST) return log("Not enough coins.");
+    S.coins -= PICKER_COST; S.pickers++; log(`Hired a picker (wage $${PICKER_WAGE}/day, picks from up to ${PICKER_CAPACITY} trees a day).`);
+  } else if (a === "truck") {
+    if (S.truck) return log("You already own a truck.");
+    if (S.coins < TRUCK_COST) return log("Not enough coins.");
+    S.coins -= TRUCK_COST; S.truck = true; log("Market truck bought: lemons are sold each night (10% fee).");
+  } else if (a === "planter") {
+    if (S.planter) return log("You already own a seedling bot.");
+    if (S.coins < PLANTER_COST) return log("Not enough coins.");
+    S.coins -= PLANTER_COST; S.planter = true; log(`Seedling bot online: replants up to ${PLANTER_PER_DAY} dead trees a day.`);
   } else if (a === "day") return nextDay();
   else if (a === "reset") { if (confirm("Start a new game?")) { S = fresh(); log("A new orchard begins."); } else return; }
   save(); render();
@@ -136,8 +167,18 @@ function nextDay() {
   S.forecast = pickWeather();
   const s = season(), evap = s === "Summer" ? 0.14 : s === "Winter" ? 0.06 : 0.1;
   let deaths = 0, made = 0;
-  for (const tile of S.tiles) {
+  const sprayed = new Set();
+  S.tiles.forEach((tile, i) => {
+    if (!tile.sprinkler) return;
+    const sx = i % W, sy = Math.floor(i / W);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = sx + dx, ny = sy + dy;
+      if (nx >= 0 && nx < W && ny >= 0 && ny < H) sprayed.add(ny * W + nx);
+    }
+  });
+  for (const [i, tile] of S.tiles.entries()) {
     tile.moist = Math.max(0, tile.moist - evap - (S.weather === "heatwave" ? 0.1 : 0));
+    if (sprayed.has(i)) tile.moist = Math.max(tile.moist, 0.7);
     if (S.weather === "rain") tile.moist = Math.min(1, tile.moist + 0.5);
     const tr = tile.tree; if (!tr || tr.dead) continue;
     if (tile.moist < 0.15) tr.dry++; else tr.dry = 0;
@@ -149,9 +190,40 @@ function nextDay() {
       if (Math.random() < bloom) { tr.fruit++; made++; }
     }
   }
+  const report = automate();
   log(`Day ${S.day}: ${S.weather}.` + (made ? ` ${made} lemons ripened.` : "") + (deaths ? ` ${deaths} tree(s) died.` : ""));
+  report.forEach(log);
   if (S.forecast === "frost") log("Almanac: frost warning tonight!");
   save(); render();
+}
+
+// Runs at the end of each day; returns log lines.
+function automate() {
+  const out = [];
+  if (S.planter) {
+    let n = 0;
+    for (const tile of S.tiles) {
+      if (n >= PLANTER_PER_DAY || S.coins < PLANT_COST) break;
+      if (tile.tree && tile.tree.dead) { tile.tree = { age: 0, fruit: 0, dry: 0, dead: false }; S.coins -= PLANT_COST; n++; }
+    }
+    if (n) out.push(`Seedling bot replanted ${n} tree(s).`);
+  }
+  if (S.pickers > 0) {
+    const ripe = S.tiles.filter(t => t.tree && !t.tree.dead && t.tree.fruit).sort((a, b) => b.tree.fruit - a.tree.fruit);
+    let picked = 0;
+    ripe.slice(0, S.pickers * PICKER_CAPACITY).forEach(t => { picked += t.tree.fruit; t.tree.fruit = 0; });
+    S.lemons += picked;
+    const wages = S.pickers * PICKER_WAGE;
+    if (S.coins >= wages) S.coins -= wages;
+    else { S.pickers--; out.push("A picker quit: you couldn't pay the wages!"); }
+    if (picked) out.push(`Pickers gathered ${picked} lemons (wages $${wages}).`);
+  }
+  if (S.truck && S.lemons) {
+    const price = (LEMON_PRICE + (S.weather === "heatwave" ? 1 : 0)) * TRUCK_CUT;
+    const gain = Math.floor(S.lemons * price);
+    S.coins += gain; out.push(`Truck sold ${S.lemons} lemons for $${gain}.`); S.lemons = 0;
+  }
+  return out;
 }
 
 function move(dx, dy) { cur.x = (cur.x + dx + W) % W; cur.y = (cur.y + dy + H) % H; render(); }
@@ -160,7 +232,7 @@ document.addEventListener("keydown", e => {
   const k = e.key.toLowerCase();
   const m = { arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] }[k];
   if (m) { e.preventDefault(); return move(...m); }
-  const a = { p: "plant", e: "water", h: "harvest", r: "sell", " ": "day" }[k];
+  const a = { p: "plant", e: "water", h: "harvest", r: "sell", b: "sprinkler", " ": "day" }[k];
   if (a) { e.preventDefault(); act(a); }
 });
 document.querySelector(".bar").addEventListener("click", e => { const b = e.target.closest("button"); if (b) act(b.dataset.a); });
