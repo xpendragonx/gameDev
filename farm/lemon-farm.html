@@ -298,17 +298,14 @@ const harvesterCost = (g) => HARVESTER_BASE_COST * 2 ** g.harvesters.length;
 function hireHarvester(g) {
   const cost = harvesterCost(g);
   if (g.coins < cost) { g.msg = `Hiring a harvester costs ${cost} coins.`; return; }
-  // Spawn on the free cleared tile nearest the starting yard.
-  let best = null, bestD = Infinity;
-  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
-    if (at(g, x, y) !== TILE.GROUND || harvesterAt(g, x, y) || !ownedParcel(g, parcelOf(x, y))) continue;
-    if (x === g.player.x && y === g.player.y) continue;
-    const d = Math.abs(x - 1) + Math.abs(y - 1);
-    if (d < bestD) { bestD = d; best = { x, y }; }
+  // The harvester appears on the tile you are facing.
+  const { x, y } = front(g);
+  if (at(g, x, y) !== TILE.GROUND || harvesterAt(g, x, y)) {
+    g.msg = 'Face an empty, cleared tile to place your new harvester there.';
+    return;
   }
-  if (!best) { g.msg = 'No free ground for a harvester to stand on.'; return; }
   g.coins -= cost;
-  g.harvesters.push({ ...best, cool: 0 });
+  g.harvesters.push({ x, y, cool: 0 });
   g.msg = `Hired a harvester for ${cost} coins. They pick ripe trees on their own.`;
 }
 
