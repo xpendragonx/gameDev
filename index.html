@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lemon Orchard</title>
 <style>
-  :root { --bg:#14180f; --fg:#d8e4c0; --dim:#7d8a68; --lemon:#f5e35a; --water:#5fb4e8; --bad:#e8734f; --good:#7ccf5a; }
+  :root { --bg:#14180f; --fg:#d8e4c0; --dim:#7d8a68; --lemon:#f5e35a; --water:#5fb4e8; --bad:#e8734f; --good:#7ccf5a; --orange:#f09a3e; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.25 "Courier New", monospace; display:flex; justify-content:center; padding:16px; }
   main { width:100%; max-width:640px; }
@@ -44,8 +44,9 @@
     <button data-a="picker">Hire picker ($40)</button>
     <button data-a="truck">Market truck ($60)</button>
     <button data-a="planter">Seedling bot ($50)</button>
+    <span class="legend" style="align-self:center">(placed on the selected tile, replacing any tree)</span>
   </div>
-  <div class="legend">Move: arrows/WASD or click a tile. &nbsp; <b>.</b> soil &nbsp; <b>s</b> sapling &nbsp; <b>Y</b> young &nbsp; <b>&amp;</b> mature &nbsp; <b>&amp;°</b> fruiting &nbsp; <b>x</b> dead &nbsp; <b style="color:var(--water)">o</b> sprinkler</div>
+  <div class="legend">Move: arrows/WASD or click a tile. &nbsp; <b>.</b> soil &nbsp; <b>s</b> sapling &nbsp; <b>Y</b> young &nbsp; <b>&amp;</b> mature &nbsp; <b>&amp;°</b> fruiting &nbsp; <b>x</b> dead &nbsp; <b style="color:var(--water)">o</b> sprinkler &nbsp; <b style="color:var(--orange)">P</b> picker &nbsp; <b style="color:var(--orange)">T</b> truck &nbsp; <b style="color:var(--orange)">R</b> seedling bot</div>
   <div id="log"></div>
 </main>
 <script>
@@ -53,6 +54,11 @@ const W = 10, H = 10, SAVE = "lemon-orchard-v1";
 const SEASONS = ["Spring", "Summer", "Autumn", "Winter"], SEASON_LEN = 30;
 const PLANT_COST = 5, LEMON_PRICE = 2;
 // Automation
+const BUILDINGS = {
+  picker: { glyph: "P", desc: "A fruit picker works here." },
+  truck: { glyph: "T", desc: "Your market truck is parked here." },
+  planter: { glyph: "R", desc: "The seedling bot lives here." },
+};
 const SPRINKLER_COST = 25, PICKER_COST = 40, PICKER_WAGE = 2, PICKER_CAPACITY = 4;
 const TRUCK_COST = 60, TRUCK_CUT = 0.9, PLANTER_COST = 50, PLANTER_PER_DAY = 2;
 // Growth thresholds (days of life): sapling -> young -> mature -> fruiting
@@ -102,6 +108,7 @@ function render() {
         }
       }
       if (tile.sprinkler) { ch = "o"; color = "var(--water)"; }
+      if (tile.building) { ch = BUILDINGS[tile.building].glyph; color = "var(--orange)"; }
       const on = x === cur.x && y === cur.y;
       html += `<span class="c${on ? " cur" : ""}" data-x="${x}" data-y="${y}" style="color:${color}">${ch}</span>`;
     }
@@ -110,16 +117,27 @@ function render() {
   $("grid").innerHTML = html;
   const tile = t();
   let info = `Tile (${cur.x},${cur.y}) — moisture ${Math.round(tile.moist * 100)}%<br>`;
-  if (tile.sprinkler) info += "A sprinkler. Waters this tile and its 8 neighbours every day.";
+  if (tile.building) info += BUILDINGS[tile.building].desc;
+  else if (tile.sprinkler) info += "A sprinkler. Waters this tile and its 8 neighbours every day.";
   else if (!tile.tree) info += "Empty soil.";
   else if (tile.tree.dead) info += "A dead tree. Plant again to clear it.";
   else info += `Tree age ${tile.tree.age}d, ${["sapling", "young tree", "mature tree", "fruiting tree"][stage(tile.tree)]}, ${tile.tree.fruit} lemons ready.`;
   $("info").innerHTML = info;
 }
 
+// Puts a building on the selected tile, replacing any tree or sprinkler there.
+function place(tile, kind) {
+  if (tile.building) { log("There's already a building on this tile."); return false; }
+  if (tile.tree) log(tile.tree.dead ? "Cleared a dead tree." : "Cut down a tree to make room.");
+  if (tile.sprinkler) log("Removed a sprinkler to make room.");
+  tile.tree = null; tile.sprinkler = false; tile.building = kind;
+  return true;
+}
+
 function act(a) {
   const tile = t();
   if (a === "plant") {
+    if (tile.building) return log("A building is in the way.");
     if (tile.sprinkler) return log("A sprinkler is in the way.");
     if (tile.tree && !tile.tree.dead) return log("Already a tree here.");
     if (S.coins < PLANT_COST) return log("Not enough coins.");
@@ -137,18 +155,22 @@ function act(a) {
   } else if (a === "sprinkler") {
     if (tile.sprinkler) return log("Already a sprinkler here.");
     if (tile.tree) return log("Sprinklers need empty soil.");
+    if (tile.building) return log("A building is in the way.");
     if (S.coins < SPRINKLER_COST) return log("Not enough coins.");
     S.coins -= SPRINKLER_COST; tile.sprinkler = true; log("Built a sprinkler.");
   } else if (a === "picker") {
     if (S.coins < PICKER_COST) return log("Not enough coins.");
+    if (!place(tile, "picker")) return;
     S.coins -= PICKER_COST; S.pickers++; log(`Hired a picker (wage $${PICKER_WAGE}/day, picks from up to ${PICKER_CAPACITY} trees a day).`);
   } else if (a === "truck") {
     if (S.truck) return log("You already own a truck.");
     if (S.coins < TRUCK_COST) return log("Not enough coins.");
+    if (!place(tile, "truck")) return;
     S.coins -= TRUCK_COST; S.truck = true; log("Market truck bought: lemons are sold each night (10% fee).");
   } else if (a === "planter") {
     if (S.planter) return log("You already own a seedling bot.");
     if (S.coins < PLANTER_COST) return log("Not enough coins.");
+    if (!place(tile, "planter")) return;
     S.coins -= PLANTER_COST; S.planter = true; log(`Seedling bot online: replants up to ${PLANTER_PER_DAY} dead trees a day.`);
   } else if (a === "day") return nextDay();
   else if (a === "reset") { if (confirm("Start a new game?")) { S = fresh(); log("A new orchard begins."); } else return; }
@@ -215,7 +237,11 @@ function automate() {
     S.lemons += picked;
     const wages = S.pickers * PICKER_WAGE;
     if (S.coins >= wages) S.coins -= wages;
-    else { S.pickers--; out.push("A picker quit: you couldn't pay the wages!"); }
+    else {
+      S.pickers--;
+      const pt = S.tiles.find(t => t.building === "picker"); if (pt) pt.building = null;
+      out.push("A picker quit: you couldn't pay the wages!");
+    }
     if (picked) out.push(`Pickers gathered ${picked} lemons (wages $${wages}).`);
   }
   if (S.truck && S.lemons) {
@@ -235,7 +261,7 @@ document.addEventListener("keydown", e => {
   const a = { p: "plant", e: "water", h: "harvest", r: "sell", b: "sprinkler", " ": "day" }[k];
   if (a) { e.preventDefault(); act(a); }
 });
-document.querySelector(".bar").addEventListener("click", e => { const b = e.target.closest("button"); if (b) act(b.dataset.a); });
+document.addEventListener("click", e => { const b = e.target.closest("button[data-a]"); if (b) act(b.dataset.a); });
 $("grid").addEventListener("click", e => {
   const c = e.target.closest(".c"); if (!c) return;
   cur = { x: +c.dataset.x, y: +c.dataset.y }; render();
