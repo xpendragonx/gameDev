@@ -63,7 +63,7 @@ const WOOD_COINS = 3;       // coins from chopping down a full tree
 
 const HARVESTER_BASE_COST = 15;   // doubles with every harvester hired
 const HARVESTER_MOVE_TICKS = 2;   // one tile every 0.5 s
-const HARVESTER_PICK_TICKS = 4;   // picking a tree takes 1 s
+const WEED_CHANCE = 0.004;        // per owned parcel per tick: about one new weed a minute per parcel
 
 // Each sprite is two strings of exactly 4 characters.
 const SPRITE = {
@@ -78,7 +78,7 @@ const SPRITE = {
 const LOCKED = ['/ / ', ' / /'];                  // land you don't own yet
 const AIM = ['[  ]', '[  ]'];            // shown on the cleared ground you are facing
 const PLAYER = [' o  ', '/|\\ '];
-const HARVESTER = ['\\o/ ', ' /\\ '];
+const harvesterSprite = (h) => ['\\o/' + (h.dir.x > 0 ? '>' : h.dir.x < 0 ? '<' : h.dir.y > 0 ? 'v' : '^'), ' /\\ '];
 
 // Lemon slots inside the braces: {  } none, {. } 1, {: } 2, {:.} 3, {::} 4
 const LEMON_SLOTS = ['  ', '. ', ': ', ':.', '::'];
@@ -140,20 +140,22 @@ function newGame(seed = Date.now()) {
 
   return {
     seed, map, W, H, owned,
+    rand: rng((seed ^ 0x9E3779B9) >>> 0),   // harvester turns and weed spawns
     player: { x: 1, y: 1, face: { x: 1, y: 0 } },
     coins: 0, lemons: 0, saplings: 3,
     step: 0,       // ticks since the game started
-    harvesters: [],  // { x, y, cool }
+    harvesters: [],  // { x, y, dir: {x, y}, cool }
     hits: {},      // "x,y" -> damage dealt to debris so far
     age: {},       // "x,y" -> step the sapling was planted
     trees: {},     // "x,y" -> { n: lemons on the tree, at: step of last change }
-    msg: 'Arrow keys / WASD to move. Walk into debris to clear it. P plants, E harvests, C chops a tree, B buys a sapling, H hires a harvester, L buys land.',
+    msg: 'Arrow keys / WASD to move. Walk into debris to clear it. P plants, E harvests, C chops a tree, B buys a sapling, H hires a harvester (it walks the way you face), L buys land.',
   };
 }
 
 const key = (x, y) => `${x},${y}`;
 const at = (g, x, y) => g.map[y][x];
-const harvesterAt = (g, x, y) => g.harvesters.some((h) => h.x === x && h.y === y);
+const harvesterOn = (g, x, y) => g.harvesters.find((h) => h.x === x && h.y === y);
+const harvesterAt = (g, x, y) => !!harvesterOn(g, x, y);
 const front = (g) => ({ x: g.player.x + g.player.face.x, y: g.player.y + g.player.face.y });
 
 function growth(g) {
@@ -305,63 +307,58 @@ function hireHarvester(g) {
     return;
   }
   g.coins -= cost;
-  g.harvesters.push({ x, y, cool: 0 });
-  g.msg = `Hired a harvester for ${cost} coins. They pick ripe trees on their own.`;
+  g.harvesters.push({ x, y, dir: { ...g.player.face }, cool: 0 });
+  g.msg = `Hired a harvester for ${cost} coins. They walk the way you were facing and pick every tree around them.`;
 }
 
 const DIRS4 = [[0, -1], [0, 1], [-1, 0], [1, 0]];
-const ripeTreeNear = (g, x, y, claimed) => {
-  for (const [dx, dy] of DIRS4) {
-    const k = key(x + dx, y + dy);
-    const t = g.trees[k];
-    if (t && t.n > 0 && !claimed.has(k)) return k;
-  }
-  return null;
-};
+const isFree = (g, x, y) =>
+  at(g, x, y) === TILE.GROUND && !harvesterAt(g, x, y) && !(x === g.player.x && y === g.player.y);
 
-// Breadth-first search over free ground to the nearest tile next to a ripe,
-// unclaimed tree. Returns { step: first tile to walk to, tree: key } or null.
-function findRoute(g, h, claimed) {
-  const seen = new Set([key(h.x, h.y)]);
-  const queue = [{ x: h.x, y: h.y, first: null }];
-  while (queue.length) {
-    const cur = queue.shift();
-    const tree = ripeTreeNear(g, cur.x, cur.y, claimed);
-    if (tree) return { step: cur.first, tree };
-    for (const [dx, dy] of DIRS4) {
-      const nx = cur.x + dx, ny = cur.y + dy, k = key(nx, ny);
-      if (seen.has(k) || at(g, nx, ny) !== TILE.GROUND) continue;
-      if (harvesterAt(g, nx, ny) || (nx === g.player.x && ny === g.player.y)) continue;
-      seen.add(k);
-      queue.push({ x: nx, y: ny, first: cur.first || { x: nx, y: ny } });
-    }
+// Pick every lemon on the (up to 8) trees around a harvester; they go to the stand.
+function pickAround(g, h) {
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const t = g.trees[key(h.x + dx, h.y + dy)];
+    if (t && t.n > 0) { g.lemons += t.n; t.n = 0; t.at = g.step; }
   }
-  return null;
 }
 
+// Walk straight ahead. When something is in the way (fence, tree, debris, weeds,
+// another harvester, you), turn to a random direction that is open.
 function runHarvesters(g) {
-  const claimed = new Set();   // trees another harvester is already heading for
   for (const h of g.harvesters) {
     if (h.cool > 0) { h.cool--; continue; }
-    const route = findRoute(g, h, claimed);
-    if (!route) continue;                       // nothing ripe: wait
-    claimed.add(route.tree);
-    if (!route.step) {                          // already standing next to it
-      const tree = g.trees[route.tree];
-      g.lemons += tree.n;                       // lemons go straight to the stand
-      tree.n = 0; tree.at = g.step;
-      h.cool = HARVESTER_PICK_TICKS - 1;
+    if (isFree(g, h.x + h.dir.x, h.y + h.dir.y)) {
+      h.x += h.dir.x; h.y += h.dir.y;
     } else {
-      h.x = route.step.x; h.y = route.step.y;
-      h.cool = HARVESTER_MOVE_TICKS - 1;
+      const open = DIRS4.filter(([dx, dy]) => isFree(g, h.x + dx, h.y + dy));
+      if (open.length) {
+        const [dx, dy] = open[Math.floor(g.rand() * open.length)];
+        h.dir = { x: dx, y: dy };
+      }
     }
+    pickAround(g, h);
+    h.cool = HARVESTER_MOVE_TICKS - 1;
   }
+}
+
+// Now and then a weed sprouts on an empty tile of land you own.
+function spawnWeeds(g) {
+  if (g.rand() >= WEED_CHANCE * ownedCount(g)) return;
+  const spots = [];
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    if (isFree(g, x, y) && ownedParcel(g, parcelOf(x, y))) spots.push([x, y]);
+  }
+  if (!spots.length) return;
+  const [x, y] = spots[Math.floor(g.rand() * spots.length)];
+  g.map[y][x] = TILE.WEEDS;
 }
 
 // One tick of farm time. Call this every TICK_MS.
 function tick(g) {
   growth(g);
   runHarvesters(g);
+  spawnWeeds(g);
 }
 
 function spriteAt(g, x, y) {
@@ -372,7 +369,8 @@ function spriteAt(g, x, y) {
     return LOCKED;
   }
   if (x === g.player.x && y === g.player.y) return PLAYER;
-  if (harvesterAt(g, x, y)) return HARVESTER;
+  const hv = harvesterOn(g, x, y);
+  if (hv) return harvesterSprite(hv);
   const t = at(g, x, y);
   if (t === TILE.TREE) return treeSprite(g.trees[key(x, y)].n);
   if (t === TILE.GROUND) {
